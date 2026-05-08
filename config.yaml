@@ -1,0 +1,124 @@
+topix_candidates:
+  - "^TOPX"
+  - "1306.T"
+  - "1348.T"
+
+log_file: monitor.log
+state_file: alert_state.json
+
+smtp:
+  host: smtp.gmail.com
+  port: 587
+  use_tls: true
+  username: your_email@example.com
+
+email:
+  from: your_email@example.com
+  to:
+    - your_email@example.com
+
+thresholds:
+  pullback_min_pct: 20
+  pullback_max_pct: 35
+  relative_3m_min_pct: -10
+  min_avg_turnover_20d_jpy: 100000000
+  breakout_relative_3m_min_pct: 10
+  deep_pullback_min_pct: 35
+  risk_relative_3m_max_pct: -15
+  dedup_days: 30
+  extra_drawdown_pct: 10
+
+stocks:
+  "半导体 / AI硬件":
+    - ticker: 8035.T
+      name: 東京エレクトロン
+    - ticker: 6857.T
+      name: アドバンテスト
+    - ticker: 6920.T
+      name: レーザーテック
+    - ticker: 6146.T
+      name: DISCO
+    - ticker: 7735.T
+      name: SCREEN
+    - ticker: 4063.T
+      name: 信越化学
+    - ticker: 3436.T
+      name: SUMCO
+    - ticker: 6315.T
+      name: TOWA
+    - ticker: 6590.T
+      name: 芝浦メカトロニクス
+    - ticker: 6526.T
+      name: ソシオネクスト
+    - ticker: 6723.T
+      name: ルネサス
+    - ticker: 6963.T
+      name: ローム
+
+  "AI基础设施 / 数据中心 / 电力 / 冷却":
+    - ticker: 5801.T
+      name: 古河電工
+    - ticker: 5802.T
+      name: 住友電工
+    - ticker: 5803.T
+      name: フジクラ
+    - ticker: 6367.T
+      name: ダイキン工業
+    - ticker: 6501.T
+      name: 日立
+    - ticker: 6503.T
+      name: 三菱電機
+    - ticker: 1969.T
+      name: 高砂熱学工業
+    - ticker: 7011.T
+      name: 三菱重工
+
+  "工业自动化 / 机器人 / 精密制造":
+    - ticker: 6861.T
+      name: キーエンス
+    - ticker: 6954.T
+      name: ファナック
+    - ticker: 6506.T
+      name: 安川電機
+    - ticker: 6645.T
+      name: オムロン
+    - ticker: 6273.T
+      name: SMC
+    - ticker: 6383.T
+      name: ダイフク
+    - ticker: 6324.T
+      name: ハーモニック・ドライブ
+
+  "医疗器械 / 高龄化 / 健康科技":
+    - ticker: 4543.T
+      name: テルモ
+    - ticker: 7733.T
+      name: オリンパス
+    - ticker: 7741.T
+      name: HOYA
+    - ticker: 7701.T
+      name: 島津製作所
+    - ticker: 6849.T
+      name: 日本光電
+
+  "金融 / 资本效率改革 / 股东回报":
+    - ticker: 8306.T
+      name: 三菱UFJ
+    - ticker: 8316.T
+      name: 三井住友FG
+    - ticker: 8697.T
+      name: 日本取引所グループ
+    - ticker: 8766.T
+      name: 東京海上HD
+
+  "商社 / 资源 / 全球基础设施":
+    - ticker: 8058.T
+      name: 三菱商事
+    - ticker: 8001.T
+      name: 伊藤忠商事
+    - ticker: 8031.T
+      name: 三井物産
+    - ticker: 8002.T
+      name: 丸紅
+    - ticker: 8053.T
+      name: 住友商事
