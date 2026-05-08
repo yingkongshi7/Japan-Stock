@@ -91,11 +91,33 @@ def fetch_price_data(ticker: str, period: str = "18mo") -> Optional[pd.DataFrame
         return None
 
     if "Adj Close" in data.columns and data["Adj Close"].notna().any():
-        data["Signal Close"] = data["Adj Close"]
+        base_close = data["Adj Close"]
     else:
-        data["Signal Close"] = data["Close"]
+        base_close = data["Close"]
+
+    data["Signal Close"] = normalize_price_series(base_close, ticker)
 
     return data
+
+
+def normalize_price_series(price: pd.Series, ticker: str) -> pd.Series:
+    normalized = price.astype(float).copy()
+    ratios = normalized / normalized.shift(1)
+    split_like_ratios = ratios[(ratios > 0) & ((ratios < 0.5) | (ratios > 2.0))]
+
+    for date, ratio in split_like_ratios.items():
+        prior_mask = normalized.index < date
+        if not prior_mask.any():
+            continue
+        normalized.loc[prior_mask] = normalized.loc[prior_mask] * float(ratio)
+        logging.warning(
+            "Detected split-like price gap for %s on %s, normalized prior prices by %.4f",
+            ticker,
+            date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else date,
+            float(ratio),
+        )
+
+    return normalized
 
 
 def get_price_at_or_before(data: pd.DataFrame, target_index: int) -> Optional[float]:
