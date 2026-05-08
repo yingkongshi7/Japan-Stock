@@ -1,0 +1,54 @@
+name: Japan Stock Monitor
+
+on:
+  schedule:
+    - cron: "30 7 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run without sending email"
+        required: false
+        default: "false"
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore alert state
+        uses: actions/cache@v4
+        with:
+          path: alert_state.json
+          key: alert-state-${{ github.run_id }}
+          restore-keys: |
+            alert-state-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run monitor
+        env:
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python stock_monitor.py --dry-run
+          else
+            python stock_monitor.py
+          fi
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-log
+          path: monitor.log
