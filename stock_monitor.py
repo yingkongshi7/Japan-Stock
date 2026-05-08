@@ -152,23 +152,39 @@ def calculate_indicators(data: pd.DataFrame) -> Dict[str, Any]:
     last_volume = float(volume.iloc[-1]) if not volume.empty and pd.notna(volume.iloc[-1]) else 0.0
     volume_spike = bool(avg_volume_20d > 0 and last_volume > avg_volume_20d * 1.5)
     avg_turnover_20d = float((raw_close * volume).tail(20).mean()) if not volume.empty else 0.0
+    rolling_avg_volume_20d = volume.rolling(20).mean() if not volume.empty else pd.Series(dtype=float)
+    recent_volume_spike_days = 0
+    if not volume.empty and len(volume) >= 23:
+        recent_volume_spike_days = int((volume.tail(3) > rolling_avg_volume_20d.tail(3) * 1.5).sum())
+
+    high_60d = float(signal_close.tail(60).max()) if len(signal_close) >= 60 else None
+    is_60d_high = bool(high_60d is not None and last_signal_close >= high_60d)
+    above_ma200_pct = None
+    if pd.notna(current_ma200) and current_ma200 != 0:
+        above_ma200_pct = (last_signal_close / float(current_ma200) - 1) * 100
 
     return {
         "current_price": last_close,
         "high_52w": high_52w,
+        "high_60d": high_60d,
+        "is_60d_high": is_60d_high,
         "is_52w_high": last_signal_close >= high_52w,
         "drawdown_pct": drawdown_pct,
         "ma20": float(ma20.iloc[-1]) if pd.notna(ma20.iloc[-1]) else None,
         "ma50": float(ma50.iloc[-1]) if pd.notna(ma50.iloc[-1]) else None,
         "ma200": float(current_ma200) if pd.notna(current_ma200) else None,
+        "above_ma200_pct": above_ma200_pct,
         "above_ma200": above_ma200,
         "recent_cross_above_ma200": recent_cross_above_ma200,
         "return_1m_pct": pct_change_from_lookback(data, 21),
         "return_3m_pct": pct_change_from_lookback(data, 63),
         "return_6m_pct": pct_change_from_lookback(data, 126),
+        "return_20d_pct": pct_change_from_lookback(data, 20),
+        "return_60d_pct": pct_change_from_lookback(data, 60),
         "avg_volume_20d": avg_volume_20d,
         "current_volume": last_volume,
         "volume_spike": volume_spike,
+        "recent_volume_spike_days": recent_volume_spike_days,
         "avg_turnover_20d": avg_turnover_20d,
         "last_date": data.index[-1].strftime("%Y-%m-%d"),
     }
@@ -176,15 +192,24 @@ def calculate_indicators(data: pd.DataFrame) -> Dict[str, Any]:
 
 def calculate_relative_strength(stock_indicators: Dict[str, Any], topix_data: pd.DataFrame) -> Dict[str, Any]:
     topix_return_3m = pct_change_from_lookback(topix_data, 63)
+    topix_return_20d = pct_change_from_lookback(topix_data, 20)
     stock_return_3m = stock_indicators.get("return_3m_pct")
+    stock_return_20d = stock_indicators.get("return_20d_pct")
 
     if topix_return_3m is None or stock_return_3m is None:
         relative_3m = None
     else:
         relative_3m = stock_return_3m - topix_return_3m
 
+    if topix_return_20d is None or stock_return_20d is None:
+        relative_20d = None
+    else:
+        relative_20d = stock_return_20d - topix_return_20d
+
     return {
+        "topix_return_20d_pct": topix_return_20d,
         "topix_return_3m_pct": topix_return_3m,
+        "relative_topix_20d_pct": relative_20d,
         "relative_topix_3m_pct": relative_3m,
     }
 
@@ -328,6 +353,15 @@ def check_alert_conditions(
             and indicators.get("ma200") is not None
             and relative_3m < float(thresholds["risk_relative_3m_max_pct"]),
         ),
+        (
+            "overheat_risk",
+            "过热提醒，避免追高",
+            (indicators.get("return_60d_pct") is not None
+            and indicators.get("return_60d_pct") >= float(thresholds["overheat_return_60d_min_pct"]))
+            or (indicators.get("above_ma200_pct") is not None
+            and indicators.get("above_ma200_pct") >= float(thresholds["overheat_above_ma200_min_pct"]))
+            or indicators.get("recent_volume_spike_days", 0) >= int(thresholds["overheat_volume_spike_days"]),
+        ),
     ]
 
     for alert_type, title, triggered in candidates:
@@ -364,21 +398,103 @@ def build_email_body(stock: StockInfo, indicators: Dict[str, Any], alert: Dict[s
 20日均线：{fmt_num(indicators.get("ma20"))}
 50日均线：{fmt_num(indicators.get("ma50"))}
 200日均线：{fmt_num(indicators.get("ma200"))}
+当前价格偏离200日均线：{fmt_pct(indicators.get("above_ma200_pct"))}
 当前价格高于200日均线：{above_ma200}
 最近5个交易日重新站上200日均线：{recent_cross}
 
 过去1个月涨幅：{fmt_pct(indicators.get("return_1m_pct"))}
 过去3个月涨幅：{fmt_pct(indicators.get("return_3m_pct"))}
 过去6个月涨幅：{fmt_pct(indicators.get("return_6m_pct"))}
+过去60日涨幅：{fmt_pct(indicators.get("return_60d_pct"))}
 过去3个月TOPIX涨幅：{fmt_pct(indicators.get("topix_return_3m_pct"))}
 过去3个月相对TOPIX超额收益：{fmt_pct(indicators.get("relative_topix_3m_pct"))}
+过去20日相对TOPIX超额收益：{fmt_pct(indicators.get("relative_topix_20d_pct"))}
 
 当前成交量：{fmt_num(indicators.get("current_volume"))}
 过去20日平均成交量：{fmt_num(indicators.get("avg_volume_20d"))}
 成交量超过20日均量1.5倍：{volume_spike}
+最近3日放量天数：{indicators.get("recent_volume_spike_days", 0)}
 过去20日平均成交额（日元）：{fmt_num(indicators.get("avg_turnover_20d"))}
 
 提醒：这不是自动交易，也不是买卖建议，只是观察名单提醒，需要人工确认。
+"""
+
+
+def check_sector_heat_conditions(
+    sector_results: Dict[str, List[Tuple[StockInfo, Dict[str, Any]]]],
+    thresholds: Dict[str, Any],
+    state: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    alerts: List[Dict[str, Any]] = []
+    min_ratio = float(thresholds.get("sector_heat_60d_high_ratio", 0.3))
+    min_relative_20d = float(thresholds.get("sector_heat_relative_20d_min_pct", 5))
+
+    for sector, results in sector_results.items():
+        valid_results = [
+            (stock, indicators)
+            for stock, indicators in results
+            if indicators.get("relative_topix_20d_pct") is not None
+        ]
+        if not valid_results:
+            continue
+
+        high_60d_stocks = [(stock, indicators) for stock, indicators in valid_results if indicators.get("is_60d_high")]
+        outperformers = [
+            (stock, indicators)
+            for stock, indicators in valid_results
+            if indicators.get("relative_topix_20d_pct") >= min_relative_20d
+        ]
+        high_60d_ratio = len(high_60d_stocks) / len(valid_results)
+
+        if high_60d_ratio >= min_ratio or len(outperformers) / len(valid_results) >= min_ratio:
+            pseudo_indicators = {
+                "drawdown_pct": 0,
+                "is_52w_high": False,
+            }
+            alert_type = "sector_heat"
+            if should_send_alert(state, sector, alert_type, pseudo_indicators, thresholds):
+                alerts.append(
+                    {
+                        "sector": sector,
+                        "valid_count": len(valid_results),
+                        "high_60d_stocks": high_60d_stocks,
+                        "outperformers": outperformers,
+                        "high_60d_ratio": high_60d_ratio,
+                        "outperformer_ratio": len(outperformers) / len(valid_results),
+                        "type": alert_type,
+                        "title": "行业热度提醒",
+                    }
+                )
+
+    return alerts
+
+
+def build_sector_heat_email_body(alert: Dict[str, Any]) -> str:
+    def format_stock_line(item: Tuple[StockInfo, Dict[str, Any]]) -> str:
+        stock, indicators = item
+        return (
+            f"- {stock.ticker} {stock.name}: "
+            f"20日相对TOPIX {fmt_pct(indicators.get('relative_topix_20d_pct'))}, "
+            f"60日涨幅 {fmt_pct(indicators.get('return_60d_pct'))}"
+        )
+
+    high_60d_lines = "\n".join(format_stock_line(item) for item in alert["high_60d_stocks"]) or "- 无"
+    outperformer_lines = "\n".join(format_stock_line(item) for item in alert["outperformers"]) or "- 无"
+
+    return f"""提醒类型：{alert["title"]}
+
+产业分类：{alert["sector"]}
+有效样本数：{alert["valid_count"]}
+创60日新高比例：{fmt_pct(alert["high_60d_ratio"] * 100)}
+20日明显跑赢TOPIX比例：{fmt_pct(alert["outperformer_ratio"] * 100)}
+
+创60日新高股票：
+{high_60d_lines}
+
+过去20日相对TOPIX超过阈值股票：
+{outperformer_lines}
+
+提醒：这是行业层面的热度观察，不是自动交易，也不是买卖建议，需要人工确认。
 """
 
 
@@ -447,6 +563,7 @@ def main() -> None:
 
     topix_ticker, topix_data = fetch_topix_data(config.get("topix_candidates", ["^TOPX", "1306.T"]))
     stocks = flatten_stock_pool(config)
+    sector_results: Dict[str, List[Tuple[StockInfo, Dict[str, Any]]]] = {}
     sent_count = 0
     triggered_count = 0
 
@@ -459,6 +576,7 @@ def main() -> None:
         try:
             indicators = calculate_indicators(data)
             indicators.update(calculate_relative_strength(indicators, topix_data))
+            sector_results.setdefault(stock.sector, []).append((stock, indicators))
             alerts = check_alert_conditions(stock, indicators, thresholds, state)
         except Exception as exc:
             logging.exception("Failed to process %s: %s", stock.ticker, exc)
@@ -487,6 +605,31 @@ def main() -> None:
                     continue
 
             record_alert_state(state, stock.ticker, alert["type"], indicators)
+
+    for sector_alert in check_sector_heat_conditions(sector_results, thresholds, state):
+        triggered_count += 1
+        subject = f"[日本股票监控] {sector_alert['title']} - {sector_alert['sector']}"
+        body = build_sector_heat_email_body(sector_alert)
+
+        if args.dry_run:
+            print("=" * 80)
+            print(subject)
+            print(body)
+        else:
+            try:
+                send_email(config, subject, body)
+                sent_count += 1
+                logging.info("Sector heat email sent for %s", sector_alert["sector"])
+            except Exception as exc:
+                logging.exception("Failed to send sector heat email for %s: %s", sector_alert["sector"], exc)
+                continue
+
+        record_alert_state(
+            state,
+            sector_alert["sector"],
+            sector_alert["type"],
+            {"drawdown_pct": 0, "high_52w": None, "current_price": None},
+        )
 
     save_state(state, state_file)
     logging.info(

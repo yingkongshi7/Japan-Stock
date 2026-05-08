@@ -10,24 +10,26 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: hailuwang71@gmail.com
-
+  username: your_email@example.com
 
 email:
-  from: hailuwang71@gmail.com
-
+  from: your_email@example.com
   to:
-    - hailuwang71@gmail.com
-
+    - your_email@example.com
 
 thresholds:
   pullback_min_pct: 20
   pullback_max_pct: 35
   relative_3m_min_pct: -10
-  min_avg_turnover_20d_jpy: 100000000
+  min_avg_turnover_20d_jpy: 1000000000
   breakout_relative_3m_min_pct: 10
   deep_pullback_min_pct: 35
   risk_relative_3m_max_pct: -15
+  sector_heat_60d_high_ratio: 0.3
+  sector_heat_relative_20d_min_pct: 5
+  overheat_return_60d_min_pct: 80
+  overheat_above_ma200_min_pct: 40
+  overheat_volume_spike_days: 3
   dedup_days: 30
   extra_drawdown_pct: 10
 
