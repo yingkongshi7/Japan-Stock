@@ -5,10 +5,15 @@ on:
     - cron: "30 7 * * 1-5"
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Run without sending email"
+      mode:
+        description: "Run mode"
         required: false
-        default: "false"
+        default: "normal"
+        type: choice
+        options:
+          - normal
+          - dry-run
+          - test-email
 
 jobs:
   monitor:
@@ -40,8 +45,15 @@ jobs:
         env:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+          MODE="${{ github.event.inputs.mode }}"
+          if [ -z "$MODE" ]; then
+            MODE="normal"
+          fi
+
+          if [ "$MODE" = "dry-run" ]; then
             python stock_monitor.py --dry-run
+          elif [ "$MODE" = "test-email" ]; then
+            python stock_monitor.py --test-email
           else
             python stock_monitor.py
           fi
