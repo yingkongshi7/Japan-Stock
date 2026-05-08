@@ -1,5 +1,6 @@
 topix_candidates:
   - "^TOPX"
+  - "998405.T"
   - "1306.T"
   - "1348.T"
 
@@ -10,15 +11,12 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: hailuwang71@gmail.com
-
+  username: your_email@example.com
 
 email:
-  from: hailuwang71@gmail.com
-
+  from: your_email@example.com
   to:
-    - hailuwang71@gmail.com
-
+    - your_email@example.com
 
 thresholds:
   pullback_min_pct: 20

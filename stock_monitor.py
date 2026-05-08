@@ -33,6 +33,7 @@ def setup_logging(log_file: str) -> None:
             logging.StreamHandler(),
         ],
     )
+    logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 
 def load_config(path: str = "config.yaml") -> Dict[str, Any]:
