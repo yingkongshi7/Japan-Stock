@@ -90,6 +90,11 @@ def fetch_price_data(ticker: str, period: str = "18mo") -> Optional[pd.DataFrame
         logging.warning("No valid close data for %s", ticker)
         return None
 
+    if "Adj Close" in data.columns and data["Adj Close"].notna().any():
+        data["Signal Close"] = data["Adj Close"]
+    else:
+        data["Signal Close"] = data["Close"]
+
     return data
 
 
@@ -102,33 +107,39 @@ def get_price_at_or_before(data: pd.DataFrame, target_index: int) -> Optional[fl
     return float(value)
 
 
-def pct_change_from_lookback(data: pd.DataFrame, lookback_days: int) -> Optional[float]:
+def pct_change_from_lookback(
+    data: pd.DataFrame,
+    lookback_days: int,
+    price_col: str = "Signal Close",
+) -> Optional[float]:
     if len(data) < lookback_days + 1:
         return None
-    current = float(data["Close"].iloc[-1])
-    past = float(data["Close"].iloc[-lookback_days - 1])
+    current = float(data[price_col].iloc[-1])
+    past = float(data[price_col].iloc[-lookback_days - 1])
     if past == 0 or pd.isna(past):
         return None
     return (current / past - 1) * 100
 
 
 def calculate_indicators(data: pd.DataFrame) -> Dict[str, Any]:
-    close = data["Close"]
+    raw_close = data["Close"]
+    signal_close = data["Signal Close"]
     volume = data["Volume"] if "Volume" in data.columns else pd.Series(dtype=float)
 
-    ma20 = close.rolling(20).mean()
-    ma50 = close.rolling(50).mean()
-    ma200 = close.rolling(200).mean()
+    ma20 = signal_close.rolling(20).mean()
+    ma50 = signal_close.rolling(50).mean()
+    ma200 = signal_close.rolling(200).mean()
 
-    last_close = float(close.iloc[-1])
-    high_52w = float(close.tail(252).max())
-    drawdown_pct = (high_52w - last_close) / high_52w * 100 if high_52w else 0
+    last_close = float(raw_close.iloc[-1])
+    last_signal_close = float(signal_close.iloc[-1])
+    high_52w = float(signal_close.tail(252).max())
+    drawdown_pct = (high_52w - last_signal_close) / high_52w * 100 if high_52w else 0
     current_ma200 = ma200.iloc[-1]
-    above_ma200 = bool(pd.notna(current_ma200) and last_close > current_ma200)
+    above_ma200 = bool(pd.notna(current_ma200) and last_signal_close > current_ma200)
 
     recent_cross_above_ma200 = False
     if len(data) >= 205:
-        recent_close = close.tail(6)
+        recent_close = signal_close.tail(6)
         recent_ma200 = ma200.tail(6)
         for i in range(1, len(recent_close)):
             prev_below_or_equal = recent_close.iloc[i - 1] <= recent_ma200.iloc[i - 1]
@@ -140,12 +151,12 @@ def calculate_indicators(data: pd.DataFrame) -> Dict[str, Any]:
     avg_volume_20d = float(volume.tail(20).mean()) if not volume.empty else 0.0
     last_volume = float(volume.iloc[-1]) if not volume.empty and pd.notna(volume.iloc[-1]) else 0.0
     volume_spike = bool(avg_volume_20d > 0 and last_volume > avg_volume_20d * 1.5)
-    avg_turnover_20d = float((close * volume).tail(20).mean()) if not volume.empty else 0.0
+    avg_turnover_20d = float((raw_close * volume).tail(20).mean()) if not volume.empty else 0.0
 
     return {
         "current_price": last_close,
         "high_52w": high_52w,
-        "is_52w_high": last_close >= high_52w,
+        "is_52w_high": last_signal_close >= high_52w,
         "drawdown_pct": drawdown_pct,
         "ma20": float(ma20.iloc[-1]) if pd.notna(ma20.iloc[-1]) else None,
         "ma50": float(ma50.iloc[-1]) if pd.notna(ma50.iloc[-1]) else None,
