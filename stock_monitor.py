@@ -52,11 +52,17 @@ def load_config(path: str = "config.yaml") -> Dict[str, Any]:
 
 def flatten_stock_pool(config: Dict[str, Any]) -> List[StockInfo]:
     stocks: List[StockInfo] = []
+    seen_tickers = set()
     for sector, items in config["stocks"].items():
         for item in items:
+            ticker = item["ticker"]
+            if ticker in seen_tickers:
+                logging.warning("Duplicate ticker %s in sector %s skipped", ticker, sector)
+                continue
+            seen_tickers.add(ticker)
             stocks.append(
                 StockInfo(
-                    ticker=item["ticker"],
+                    ticker=ticker,
                     name=item["name"],
                     sector=sector,
                 )

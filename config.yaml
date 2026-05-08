@@ -1,7 +1,7 @@
 topix_candidates:
+  - "^TOPX"
   - "1306.T"
   - "1348.T"
-  - "^TOPX"
 
 log_file: monitor.log
 state_file: alert_state.json
@@ -10,15 +10,12 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: hailuwang71@gmail.com
-
+  username: your_email@example.com
 
 email:
-  from: hailuwang71@gmail.com
-
+  from: your_email@example.com
   to:
-    - hailuwang71@gmail.com
-
+    - your_email@example.com
 
 thresholds:
   pullback_min_pct: 20
@@ -28,8 +25,8 @@ thresholds:
   breakout_relative_3m_min_pct: 10
   deep_pullback_min_pct: 35
   risk_relative_3m_max_pct: -15
-  sector_heat_60d_high_ratio: 0.3
-  sector_heat_relative_20d_min_pct: 5
+  sector_heat_60d_high_ratio: 0.4
+  sector_heat_relative_20d_min_pct: 8
   overheat_return_60d_min_pct: 80
   overheat_above_ma200_min_pct: 40
   overheat_volume_spike_days: 3
@@ -64,6 +61,8 @@ stocks:
       name: ローム
 
   "AI基础设施 / 数据中心 / 电力 / 冷却":
+    - ticker: 5805.T
+      name: SWCC
     - ticker: 5801.T
       name: 古河電工
     - ticker: 5802.T
@@ -76,10 +75,12 @@ stocks:
       name: 日立
     - ticker: 6503.T
       name: 三菱電機
+    - ticker: 1942.T
+      name: 関電工
     - ticker: 1969.T
       name: 高砂熱学工業
-    - ticker: 7011.T
-      name: 三菱重工
+    - ticker: 1951.T
+      name: エクシオグループ
 
   "工业自动化 / 机器人 / 精密制造":
     - ticker: 6861.T
@@ -96,6 +97,22 @@ stocks:
       name: ダイフク
     - ticker: 6324.T
       name: ハーモニック・ドライブ
+    - ticker: 6481.T
+      name: THK
+    - ticker: 6479.T
+      name: ミネベアミツミ
+
+  "防卫 / 航天 / 安全保障":
+    - ticker: 7011.T
+      name: 三菱重工
+    - ticker: 7012.T
+      name: 川崎重工
+    - ticker: 7013.T
+      name: IHI
+    - ticker: 6701.T
+      name: NEC
+    - ticker: 6702.T
+      name: 富士通
 
   "医疗器械 / 高龄化 / 健康科技":
     - ticker: 4543.T
