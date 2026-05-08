@@ -656,6 +656,51 @@ def build_sector_heat_email_body(alert: Dict[str, Any]) -> str:
 """
 
 
+def print_report(rows: List[Dict[str, Any]]) -> None:
+    """Print a compact indicator report even when no alert is triggered."""
+    if not rows:
+        print("No valid stock data to report.")
+        return
+
+    headers = [
+        "ticker",
+        "name",
+        "sector",
+        "price",
+        "drawdown",
+        "above200",
+        "rel3m",
+        "turnover20d_jpy",
+        "alerts",
+    ]
+    table_rows = []
+    for row in rows:
+        indicators = row["indicators"]
+        alerts = row["alerts"]
+        table_rows.append(
+            {
+                "ticker": row["stock"].ticker,
+                "name": row["stock"].name,
+                "sector": row["stock"].sector,
+                "price": fmt_num(indicators.get("current_price")),
+                "drawdown": fmt_pct(indicators.get("drawdown_pct")),
+                "above200": "Y" if indicators.get("above_ma200") else "N",
+                "rel3m": fmt_pct(indicators.get("relative_topix_3m_pct")),
+                "turnover20d_jpy": fmt_num(indicators.get("avg_turnover_20d")),
+                "alerts": ",".join(alert["type"] for alert in alerts) if alerts else "-",
+            }
+        )
+
+    widths = {
+        header: max(len(header), *(len(str(row[header])) for row in table_rows))
+        for header in headers
+    }
+    print(" | ".join(header.ljust(widths[header]) for header in headers))
+    print("-+-".join("-" * widths[header] for header in headers))
+    for row in table_rows:
+        print(" | ".join(str(row[header]).ljust(widths[header]) for header in headers))
+
+
 def send_email(config: Dict[str, Any], subject: str, body: str) -> None:
     smtp_config = config["smtp"]
     email_config = config["email"]
@@ -703,6 +748,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Monitor Japanese stock pullbacks and relative strength.")
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
     parser.add_argument("--dry-run", action="store_true", help="Print alerts without sending email")
+    parser.add_argument("--report", action="store_true", help="Print a compact indicator report for all processed stocks")
     parser.add_argument("--test-email", action="store_true", help="Send a test email and exit")
     args = parser.parse_args()
 
@@ -722,6 +768,7 @@ def main() -> None:
     topix_ticker, topix_data = fetch_topix_data(config.get("topix_candidates", ["^TOPX", "1306.T"]))
     stocks = flatten_stock_pool(config)
     sector_results: Dict[str, List[Tuple[StockInfo, Dict[str, Any]]]] = {}
+    report_rows: List[Dict[str, Any]] = []
     sent_count = 0
     triggered_count = 0
 
@@ -736,6 +783,7 @@ def main() -> None:
             indicators.update(calculate_relative_strength(indicators, topix_data))
             sector_results.setdefault(stock.sector, []).append((stock, indicators))
             alerts = check_alert_conditions(stock, indicators, thresholds, state)
+            report_rows.append({"stock": stock, "indicators": indicators, "alerts": alerts})
         except Exception as exc:
             logging.exception("Failed to process %s: %s", stock.ticker, exc)
             continue
@@ -790,6 +838,9 @@ def main() -> None:
             sector_alert["type"],
             {"drawdown_pct": 0, "high_52w": None, "current_price": None},
         )
+
+    if args.report:
+        print_report(report_rows)
 
     save_state(state, state_file)
     logging.info(
