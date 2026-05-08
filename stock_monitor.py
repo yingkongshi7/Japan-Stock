@@ -407,12 +407,138 @@ def fmt_num(value: Optional[float]) -> str:
     return "N/A" if value is None else f"{value:,.2f}"
 
 
+def alert_action_prefix(alert_type: str) -> str:
+    """Return a short action prefix for email subjects."""
+    mapping = {
+        "pullback_watch": "买入候选",
+        "deep_pullback_trend_intact": "重点研究",
+        "breakout_strength": "强势观察",
+        "overheat_risk": "不宜追高",
+        "trend_weakness": "风险警告",
+        "sector_heat": "行业热度",
+    }
+    return mapping.get(alert_type, "观察提醒")
+
+
+def trade_action_level(alert_type: str) -> str:
+    """Return the action level shown in the email body."""
+    mapping = {
+        "deep_pullback_trend_intact": "A：重点研究，可能适合分批买入",
+        "pullback_watch": "B：买入候选，可小额分批观察",
+        "breakout_strength": "C：强势观察，不宜追高重仓",
+        "overheat_risk": "D：不宜购买，避免追高",
+        "trend_weakness": "E：风险警告，不建议新买入",
+        "sector_heat": "C：行业热度上升，筛选个股，不直接追买",
+    }
+    return mapping.get(alert_type, "C：仅观察")
+
+
+def build_trade_recommendation(alert_type: str, indicators: Dict[str, Any]) -> str:
+    """Build a plain-language recommendation for a stock-level alert."""
+    if alert_type == "pullback_watch":
+        return """交易建议：适合买入候选观察。
+
+理由：
+- 股价已经从52周高点回撤到合理观察区间。
+- 趋势尚未明显破坏，或正在重新站上200日线。
+- 相对TOPIX没有明显走弱。
+
+建议操作：
+- 可以加入重点观察名单。
+- 如果基本面和财报没有恶化，可考虑小额分批买入。
+- 不建议一次性重仓。
+- 第一笔可控制在计划仓位的20%～30%。
+"""
+
+    if alert_type == "deep_pullback_trend_intact":
+        return """交易建议：适合重点研究，可能存在较好买点。
+
+理由：
+- 股价已经深度回撤。
+- 但长期趋势没有完全破坏，或已经重新站上200日线。
+- 这类信号可能出现在优质股错杀或行业阶段性恐慌后。
+
+建议操作：
+- 优先检查最新财报、业绩修正和行业新闻。
+- 如果基本面没有恶化，可考虑分批买入。
+- 第一笔可控制在计划仓位的30%左右。
+- 如果之后继续回撤，但基本面仍然稳健，可再分批加仓。
+"""
+
+    if alert_type == "breakout_strength":
+        return """交易建议：趋势强，但不宜追高重仓。
+
+理由：
+- 股价创出52周新高，并伴随成交量放大。
+- 相对TOPIX表现较强，说明资金正在流入。
+- 但突破后短期可能出现回踩或过热。
+
+建议操作：
+- 不建议看到邮件后立刻重仓追入。
+- 可加入强势股观察名单。
+- 如果已有仓位，可以继续持有。
+- 如果没有仓位，建议等待回踩20日线/50日线，或只做小仓试探。
+"""
+
+    if alert_type == "overheat_risk":
+        return """交易建议：不宜购买，避免追高。
+
+理由：
+- 股价短期涨幅过大，或明显远离200日线。
+- 最近可能伴随连续放量，说明交易拥挤。
+- 此类信号不是买入信号，而是风险提醒。
+
+建议操作：
+- 不建议新买入。
+- 已有仓位可以考虑部分止盈。
+- 至少应停止继续加仓。
+- 如果后续回撤到20日线/50日线附近，再重新观察。
+"""
+
+    if alert_type == "trend_weakness":
+        return """交易建议：不建议买入，已有仓位需要复查。
+
+理由：
+- 股价跌破200日线。
+- 相对TOPIX明显走弱。
+- 说明个股趋势可能已经转弱，不能简单理解为便宜。
+
+建议操作：
+- 不建议新买入。
+- 已有仓位需要检查基本面是否恶化。
+- 如果业绩、订单或行业逻辑变差，应考虑减仓。
+- 如果只是短期市场波动，可以等待重新站上200日线后再观察。
+"""
+
+    return """交易建议：仅作为观察提醒。
+
+建议操作：
+- 不自动买入。
+- 先检查基本面、估值、财报和行业消息。
+- 再决定是否加入买入候选。
+"""
+
+
+def build_sector_recommendation(alert: Dict[str, Any]) -> str:
+    """Build a recommendation block for a sector heat alert."""
+    return """交易建议：行业热度上升，但不代表可以无差别追买。
+
+建议操作：
+- 优先从该行业中筛选已经回撤、但趋势没有破坏的个股。
+- 对已经连续大涨、远离200日线的个股，避免追高。
+- 如果你已有该行业仓位，可以继续持有，但不建议因热度提醒直接重仓加仓。
+- 更好的做法是等待行业内优质股回踩20日线或50日线后再观察。
+- 行业热度提醒主要用于发现资金流入方向，而不是立即买入指令。
+"""
+
+
 def build_email_body(stock: StockInfo, indicators: Dict[str, Any], alert: Dict[str, str]) -> str:
     above_ma200 = "是" if indicators.get("above_ma200") else "否"
     recent_cross = "是" if indicators.get("recent_cross_above_ma200") else "否"
     volume_spike = "是" if indicators.get("volume_spike") else "否"
 
     return f"""提醒类型：{alert["title"]}
+操作等级：{trade_action_level(alert["type"])}
 
 股票代码：{stock.ticker}
 股票名称：{stock.name}
@@ -444,7 +570,8 @@ def build_email_body(stock: StockInfo, indicators: Dict[str, Any], alert: Dict[s
 最近3日放量天数：{indicators.get("recent_volume_spike_days", 0)}
 过去20日平均成交额（日元）：{fmt_num(indicators.get("avg_turnover_20d"))}
 
-提醒：这不是自动交易，也不是买卖建议，只是观察名单提醒，需要人工确认。
+{build_trade_recommendation(alert["type"], indicators)}
+提醒：这不是自动交易，也不是确定买卖指令，只是观察名单提醒，需要人工确认。
 """
 
 
@@ -510,6 +637,7 @@ def build_sector_heat_email_body(alert: Dict[str, Any]) -> str:
     outperformer_lines = "\n".join(format_stock_line(item) for item in alert["outperformers"]) or "- 无"
 
     return f"""提醒类型：{alert["title"]}
+操作等级：{trade_action_level(alert["type"])}
 
 产业分类：{alert["sector"]}
 有效样本数：{alert["valid_count"]}
@@ -522,7 +650,8 @@ def build_sector_heat_email_body(alert: Dict[str, Any]) -> str:
 过去20日相对TOPIX超过阈值股票：
 {outperformer_lines}
 
-提醒：这是行业层面的热度观察，不是自动交易，也不是买卖建议，需要人工确认。
+{build_sector_recommendation(alert)}
+提醒：这是行业层面的热度观察，不是自动交易，也不是确定买卖指令，需要人工确认。
 """
 
 
@@ -616,7 +745,8 @@ def main() -> None:
 
         for alert in alerts:
             triggered_count += 1
-            subject = f"[日本股票监控] {alert['title']} - {stock.ticker} {stock.name}"
+            prefix = alert_action_prefix(alert["type"])
+            subject = f"[日本股票监控][{prefix}] {alert['title']} - {stock.ticker} {stock.name}"
             body = build_email_body(stock, indicators, alert)
 
             if args.dry_run:
@@ -636,7 +766,8 @@ def main() -> None:
 
     for sector_alert in check_sector_heat_conditions(sector_results, thresholds, state):
         triggered_count += 1
-        subject = f"[日本股票监控] {sector_alert['title']} - {sector_alert['sector']}"
+        prefix = alert_action_prefix(sector_alert["type"])
+        subject = f"[日本股票监控][{prefix}] {sector_alert['title']} - {sector_alert['sector']}"
         body = build_sector_heat_email_body(sector_alert)
 
         if args.dry_run:
