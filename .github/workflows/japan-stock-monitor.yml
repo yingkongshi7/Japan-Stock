@@ -52,3 +52,11 @@ jobs:
         with:
           name: monitor-log
           path: monitor.log
+
+      - name: Upload alert state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alert-state
+          path: alert_state.json
+          if-no-files-found: warn
