@@ -7,19 +7,21 @@ topix_candidates:
 log_file: monitor.log
 state_file: alert_state.json
 
+signal_log:
+  enabled: true
+  path: stock_signal_log.csv
+  append_only: true
+
 smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: hailuwang71@gmail.com
-
+  username: your_email@example.com
 
 email:
-  from: hailuwang71@gmail.com
-
+  from: your_email@example.com
   to:
-    - hailuwang71@gmail.com
-
+    - your_email@example.com
 
 thresholds:
   pullback_min_pct: 20
@@ -29,6 +31,8 @@ thresholds:
   breakout_relative_3m_min_pct: 10
   deep_pullback_min_pct: 35
   risk_relative_3m_max_pct: -15
+  trend_intact_relative_3m_min_pct: -5
+  trend_intact_above_ma200_min_pct: 0
   sector_heat_60d_high_ratio: 0.4
   sector_heat_relative_20d_min_pct: 8
   overheat_return_60d_min_pct: 80

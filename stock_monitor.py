@@ -1,8 +1,10 @@
 import argparse
+import csv
 import json
 import logging
 import os
 import smtplib
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
@@ -24,7 +26,86 @@ class StockInfo:
     sector: str
 
 
+SIGNAL_LOG_COLUMNS = [
+    "signal_id",
+    "signal_date",
+    "run_datetime_jst",
+    "ticker",
+    "name",
+    "sector",
+    "signal_type",
+    "raw_alerts",
+    "action_level",
+    "script_title",
+    "price_at_signal",
+    "high_52w",
+    "drawdown_pct",
+    "ma20",
+    "ma50",
+    "ma200",
+    "above_ma200",
+    "above_ma200_pct",
+    "recent_cross_above_ma200",
+    "return_1m_pct",
+    "return_3m_pct",
+    "return_6m_pct",
+    "return_20d_pct",
+    "return_60d_pct",
+    "topix_return_20d_pct",
+    "topix_return_3m_pct",
+    "relative_topix_20d_pct",
+    "relative_topix_3m_pct",
+    "volume_spike",
+    "recent_volume_spike_days",
+    "current_volume",
+    "avg_volume_20d",
+    "avg_turnover_20d",
+    "manual_review_done",
+    "review_date",
+    "fundamental_status",
+    "news_risk",
+    "earnings_risk",
+    "valuation_comment",
+    "personal_decision",
+    "decision_reason",
+    "paper_entry_date",
+    "paper_entry_price",
+    "planned_position_pct",
+    "stop_loss_price",
+    "target_review_price",
+    "exit_rule",
+    "actual_buy",
+    "actual_position_note",
+    "price_1w",
+    "return_1w_pct",
+    "topix_return_1w_pct",
+    "relative_return_1w_pct",
+    "price_1m",
+    "return_1m_forward_pct",
+    "topix_return_1m_pct",
+    "relative_return_1m_pct",
+    "price_3m",
+    "return_3m_forward_pct",
+    "topix_return_3m_pct",
+    "relative_return_3m_pct",
+    "price_6m",
+    "return_6m_forward_pct",
+    "topix_return_6m_pct",
+    "relative_return_6m_pct",
+    "max_gain_1m_pct",
+    "max_drawdown_1m_pct",
+    "max_gain_3m_pct",
+    "max_drawdown_3m_pct",
+    "result_label",
+    "notes",
+]
+
+
 def setup_logging(log_file: str) -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -266,6 +347,129 @@ def save_state(state: Dict[str, Any], path: str) -> None:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
+def make_signal_id(signal_date: str, ticker: str, signal_type: str) -> str:
+    return f"{signal_date}_{ticker}_{signal_type}"
+
+
+def load_existing_signal_ids(path: str) -> set[str]:
+    signal_path = Path(path)
+    if not signal_path.exists():
+        return set()
+
+    try:
+        with signal_path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            return {
+                row["signal_id"]
+                for row in reader
+                if row.get("signal_id")
+            }
+    except OSError as exc:
+        logging.warning("Failed to load signal log %s: %s", path, exc)
+        return set()
+
+
+def signal_value(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return value
+
+
+def build_signal_log_row(
+    stock: StockInfo,
+    indicators: Dict[str, Any],
+    combined_alert: Dict[str, Any],
+    run_datetime: datetime,
+) -> Dict[str, Any]:
+    signal_date = indicators.get("last_date") or run_datetime.strftime("%Y-%m-%d")
+    signal_type = combined_alert["type"]
+    raw_alerts = ";".join(alert["type"] for alert in combined_alert.get("raw_alerts", []))
+
+    row = {column: "" for column in SIGNAL_LOG_COLUMNS}
+    row.update(
+        {
+            "signal_id": make_signal_id(signal_date, stock.ticker, signal_type),
+            "signal_date": signal_date,
+            "run_datetime_jst": run_datetime.strftime("%Y-%m-%d %H:%M:%S JST"),
+            "ticker": stock.ticker,
+            "name": stock.name,
+            "sector": stock.sector,
+            "signal_type": signal_type,
+            "raw_alerts": raw_alerts,
+            "action_level": combined_alert.get("action_level") or trade_action_level(signal_type),
+            "script_title": combined_alert.get("title", ""),
+            "price_at_signal": indicators.get("current_price"),
+            "high_52w": indicators.get("high_52w"),
+            "drawdown_pct": indicators.get("drawdown_pct"),
+            "ma20": indicators.get("ma20"),
+            "ma50": indicators.get("ma50"),
+            "ma200": indicators.get("ma200"),
+            "above_ma200": indicators.get("above_ma200"),
+            "above_ma200_pct": indicators.get("above_ma200_pct"),
+            "recent_cross_above_ma200": indicators.get("recent_cross_above_ma200"),
+            "return_1m_pct": indicators.get("return_1m_pct"),
+            "return_3m_pct": indicators.get("return_3m_pct"),
+            "return_6m_pct": indicators.get("return_6m_pct"),
+            "return_20d_pct": indicators.get("return_20d_pct"),
+            "return_60d_pct": indicators.get("return_60d_pct"),
+            "topix_return_20d_pct": indicators.get("topix_return_20d_pct"),
+            "topix_return_3m_pct": indicators.get("topix_return_3m_pct"),
+            "relative_topix_20d_pct": indicators.get("relative_topix_20d_pct"),
+            "relative_topix_3m_pct": indicators.get("relative_topix_3m_pct"),
+            "volume_spike": indicators.get("volume_spike"),
+            "recent_volume_spike_days": indicators.get("recent_volume_spike_days"),
+            "current_volume": indicators.get("current_volume"),
+            "avg_volume_20d": indicators.get("avg_volume_20d"),
+            "avg_turnover_20d": indicators.get("avg_turnover_20d"),
+        }
+    )
+    return {column: signal_value(row.get(column, "")) for column in SIGNAL_LOG_COLUMNS}
+
+
+def append_signal_log_rows(path: str, rows: List[Dict[str, Any]]) -> int:
+    signal_path = Path(path)
+    signal_path.parent.mkdir(parents=True, exist_ok=True)
+    existing_ids = load_existing_signal_ids(path)
+    new_rows = []
+    for row in rows:
+        signal_id = row.get("signal_id")
+        if not signal_id or signal_id in existing_ids:
+            continue
+        existing_ids.add(str(signal_id))
+        new_rows.append({column: row.get(column, "") for column in SIGNAL_LOG_COLUMNS})
+
+    if not new_rows:
+        return 0
+
+    file_exists = signal_path.exists() and signal_path.stat().st_size > 0
+    with signal_path.open("a", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(SIGNAL_LOG_COLUMNS)
+        for row in new_rows:
+            seen_columns: set[str] = set()
+            values = []
+            for column in SIGNAL_LOG_COLUMNS:
+                if column in seen_columns:
+                    values.append("")
+                else:
+                    values.append(row.get(column, ""))
+                    seen_columns.add(column)
+            writer.writerow(values)
+
+    return len(new_rows)
+
+
+def signal_log_settings(config: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
+    configured = config.get("signal_log", {}) or {}
+    enabled = bool(configured.get("enabled", True)) or bool(args.export_signals)
+    path = args.signal_log or configured.get("path", "stock_signal_log.csv")
+    append_only = bool(configured.get("append_only", True))
+    return {"enabled": enabled, "path": path, "append_only": append_only}
+
+
 def prune_old_state(state: Dict[str, Any], dedup_days: int) -> None:
     cutoff = datetime.now(JST).date() - timedelta(days=dedup_days * 2)
     alerts = state.get("alerts", {})
@@ -298,7 +502,12 @@ def should_send_alert(
     if not existing:
         return True
 
-    if indicators.get("is_52w_high") and alert_type in {"pullback_watch", "deep_pullback_trend_intact"}:
+    if indicators.get("is_52w_high") and alert_type in {
+        "pullback_watch",
+        "deep_pullback_trend_intact",
+        "pullback_but_overheated",
+        "weak_deep_pullback",
+    }:
         return True
 
     last_alert_date_str = existing.get("last_alert_date")
@@ -330,8 +539,29 @@ def record_alert_state(state: Dict[str, Any], ticker: str, alert_type: str, indi
 
 
 def reset_drawdown_alerts_on_new_high(state: Dict[str, Any], ticker: str) -> None:
-    for alert_type in ("pullback_watch", "deep_pullback_trend_intact"):
+    for alert_type in (
+        "pullback_watch",
+        "deep_pullback_trend_intact",
+        "pullback_but_overheated",
+        "weak_deep_pullback",
+    ):
         state.get("alerts", {}).pop(f"{ticker}|{alert_type}", None)
+
+
+def is_trend_intact(indicators: Dict[str, Any], thresholds: Dict[str, Any]) -> bool:
+    relative_3m = indicators.get("relative_topix_3m_pct")
+    above_ma200 = indicators.get("above_ma200")
+    above_ma200_pct = indicators.get("above_ma200_pct")
+
+    return (
+        bool(above_ma200)
+        and relative_3m is not None
+        and relative_3m > float(thresholds.get("trend_intact_relative_3m_min_pct", -5))
+        and (
+            above_ma200_pct is None
+            or above_ma200_pct > float(thresholds.get("trend_intact_above_ma200_min_pct", 0))
+        )
+    )
 
 
 def check_alert_conditions(
@@ -344,7 +574,12 @@ def check_alert_conditions(
     drawdown = indicators.get("drawdown_pct")
     relative_3m = indicators.get("relative_topix_3m_pct")
     avg_turnover_20d = indicators.get("avg_turnover_20d", 0)
-    trend_ok = indicators.get("above_ma200") or indicators.get("recent_cross_above_ma200")
+    trend_intact = is_trend_intact(indicators, thresholds)
+    pullback_trend_ok = trend_intact or (
+        indicators.get("recent_cross_above_ma200")
+        and relative_3m is not None
+        and relative_3m > 0
+    )
     liquidity_ok = avg_turnover_20d >= float(thresholds.get("min_avg_turnover_20d_jpy", 0))
 
     if indicators.get("is_52w_high"):
@@ -359,7 +594,7 @@ def check_alert_conditions(
             "回撤观察",
             drawdown >= float(thresholds["pullback_min_pct"])
             and drawdown <= float(thresholds["pullback_max_pct"])
-            and trend_ok
+            and pullback_trend_ok
             and relative_3m > float(thresholds["relative_3m_min_pct"])
             and liquidity_ok,
         ),
@@ -373,7 +608,7 @@ def check_alert_conditions(
         (
             "deep_pullback_trend_intact",
             "深度回撤但趋势未坏",
-            drawdown >= float(thresholds["deep_pullback_min_pct"]) and trend_ok,
+            drawdown >= float(thresholds["deep_pullback_min_pct"]) and trend_intact,
         ),
         (
             "trend_weakness",
@@ -394,7 +629,7 @@ def check_alert_conditions(
     ]
 
     for alert_type, title, triggered in candidates:
-        if triggered and should_send_alert(state, stock.ticker, alert_type, indicators, thresholds):
+        if triggered:
             alerts.append({"type": alert_type, "title": title})
 
     return alerts
@@ -417,6 +652,9 @@ def alert_action_prefix(alert_type: str) -> str:
         "overheat_risk": "不宜追高",
         "trend_weakness": "风险警告",
         "sector_heat": "行业热度",
+        "weak_deep_pullback": "高风险复查",
+        "pullback_but_overheated": "观察名单",
+        "breakout_but_overheated": "强势观察",
     }
     return mapping.get(alert_type, "观察提醒")
 
@@ -430,6 +668,9 @@ def trade_action_level(alert_type: str) -> str:
         "overheat_risk": "D：不宜购买，避免追高",
         "trend_weakness": "E：风险警告，不建议新买入",
         "sector_heat": "C：行业热度上升，筛选个股，不直接追买",
+        "weak_deep_pullback": "E：高风险复查，不建议新买入",
+        "pullback_but_overheated": "C：加入观察名单，等待回踩，不宜追高",
+        "breakout_but_overheated": "C：强势观察，不宜追高",
     }
     return mapping.get(alert_type, "C：仅观察")
 
@@ -533,19 +774,154 @@ def build_sector_recommendation(alert: Dict[str, Any]) -> str:
 """
 
 
-def build_email_body(stock: StockInfo, indicators: Dict[str, Any], alert: Dict[str, str]) -> str:
+def make_combined_alert(
+    alert_type: str,
+    title: str,
+    raw_alerts: List[Dict[str, str]],
+    medium_term_view: str,
+    short_term_view: str,
+    recommendation: str,
+) -> Dict[str, Any]:
+    return {
+        "type": alert_type,
+        "title": title,
+        "action_prefix": alert_action_prefix(alert_type),
+        "action_level": trade_action_level(alert_type),
+        "raw_alerts": raw_alerts,
+        "medium_term_view": medium_term_view,
+        "short_term_view": short_term_view,
+        "recommendation": recommendation,
+    }
+
+
+def simple_combined_alert(raw_alert: Dict[str, str], raw_alerts: List[Dict[str, str]]) -> Dict[str, Any]:
+    alert_type = raw_alert["type"]
+    if alert_type == "trend_weakness":
+        return make_combined_alert(
+            alert_type,
+            raw_alert["title"],
+            raw_alerts,
+            "个股已经跌破关键趋势线，位置便宜本身不足以构成买入理由。",
+            "相对 TOPIX 明显走弱，短期需要把风险控制放在第一位。",
+            "不建议新买入；已有仓位需要复查基本面、财报、订单和行业逻辑。",
+        )
+    if alert_type == "overheat_risk":
+        return make_combined_alert(
+            alert_type,
+            raw_alert["title"],
+            raw_alerts,
+            "中期趋势可能仍强，但当前价格已经明显透支部分预期。",
+            "短期涨幅、均线偏离或成交量拥挤，继续追高的风险较高。",
+            "不建议新买入；已有仓位可考虑部分止盈，至少停止继续加仓。",
+        )
+    if alert_type == "deep_pullback_trend_intact":
+        return make_combined_alert(
+            alert_type,
+            raw_alert["title"],
+            raw_alerts,
+            "股价深度回撤，但当前仍站在长期趋势线之上，值得重点研究。",
+            "需要确认回撤是估值消化还是基本面恶化，不能只看跌幅。",
+            "优先检查财报、业绩修正和行业新闻；基本面未恶化时再考虑分批观察。",
+        )
+    if alert_type == "pullback_watch":
+        return make_combined_alert(
+            alert_type,
+            raw_alert["title"],
+            raw_alerts,
+            "股价从 52 周高点回撤到观察区间，且相对强弱没有明显恶化。",
+            "短期仍需等待价格和成交量确认，不宜一次性重仓。",
+            "可以加入重点观察名单；若基本面稳定，可考虑小额分批研究。",
+        )
+    if alert_type == "breakout_strength":
+        return make_combined_alert(
+            alert_type,
+            raw_alert["title"],
+            raw_alerts,
+            "股价创出 52 周新高，且相对 TOPIX 表现较强，说明资金可能正在流入。",
+            "突破后短期可能回踩或波动加大，不适合看到邮件后重仓追入。",
+            "已有仓位可继续观察；没有仓位时，等待回踩 20 日线/50 日线或小仓试探。",
+        )
+    return make_combined_alert(
+        alert_type,
+        raw_alert["title"],
+        raw_alerts,
+        "该信号仅表示值得进入观察范围。",
+        "短期方向仍需结合价格、成交量和市场环境复查。",
+        "不自动买入；先检查基本面、估值、财报和行业消息。",
+    )
+
+
+def combine_stock_alerts(
+    stock: StockInfo,
+    indicators: Dict[str, Any],
+    raw_alerts: List[Dict[str, str]],
+) -> Optional[Dict[str, Any]]:
+    """Merge raw stock alerts into one non-conflicting stock-level alert."""
+    if not raw_alerts:
+        return None
+
+    raw_types = {alert["type"] for alert in raw_alerts}
+    if "trend_weakness" in raw_types and "deep_pullback_trend_intact" in raw_types:
+        return make_combined_alert(
+            "weak_deep_pullback",
+            "深度回撤但趋势转弱，谨慎复查",
+            raw_alerts,
+            "股价从 52 周高点深度回撤，位置可能值得跟踪。",
+            "当前跌破关键均线，且相对 TOPIX 明显走弱，不能简单理解为便宜。",
+            "不建议新买入；已有仓位应复查基本面、财报、订单和行业逻辑。",
+        )
+    if "pullback_watch" in raw_types and "overheat_risk" in raw_types:
+        return make_combined_alert(
+            "pullback_but_overheated",
+            "回撤后修复，但短线过热",
+            raw_alerts,
+            "股价仍明显低于 52 周高点，并重新站上或接近 200 日线，可以加入观察名单。",
+            "近期涨幅较大且成交量放大，说明短线可能拥挤，不适合追高。",
+            "等待回踩 20 日线 / 50 日线、成交量降温，或下一次财报确认基本面后再评估。",
+        )
+    if "breakout_strength" in raw_types and "overheat_risk" in raw_types:
+        return make_combined_alert(
+            "breakout_but_overheated",
+            "强势突破但短线过热",
+            raw_alerts,
+            "股价创新高并有资金流入迹象。",
+            "短期涨幅和成交量可能过热，新仓追高的风险较高。",
+            "已有仓位可以继续观察；不建议新仓重仓追高。",
+        )
+
+    priority = [
+        "trend_weakness",
+        "overheat_risk",
+        "deep_pullback_trend_intact",
+        "pullback_watch",
+        "breakout_strength",
+    ]
+    raw_by_type = {alert["type"]: alert for alert in raw_alerts}
+    for alert_type in priority:
+        if alert_type in raw_by_type:
+            return simple_combined_alert(raw_by_type[alert_type], raw_alerts)
+
+    return simple_combined_alert(raw_alerts[0], raw_alerts)
+
+
+def build_raw_alert_lines(raw_alerts: List[Dict[str, str]]) -> str:
+    return "\n".join(f"- {alert['type']}：{alert['title']}" for alert in raw_alerts) or "- 无"
+
+
+def build_email_body(stock: StockInfo, indicators: Dict[str, Any], combined_alert: Dict[str, Any]) -> str:
     above_ma200 = "是" if indicators.get("above_ma200") else "否"
     recent_cross = "是" if indicators.get("recent_cross_above_ma200") else "否"
     volume_spike = "是" if indicators.get("volume_spike") else "否"
 
-    return f"""提醒类型：{alert["title"]}
-操作等级：{trade_action_level(alert["type"])}
+    return f"""提醒类型：{combined_alert["title"]}
+操作等级：{combined_alert["action_level"]}
 
 股票代码：{stock.ticker}
 股票名称：{stock.name}
 产业分类：{stock.sector}
 数据日期：{indicators.get("last_date", "N/A")}
 
+核心指标：
 当前价格：{fmt_num(indicators.get("current_price"))}
 52周最高收盘价：{fmt_num(indicators.get("high_52w"))}
 从52周高点回撤：{fmt_pct(indicators.get("drawdown_pct"))}
@@ -571,7 +947,19 @@ def build_email_body(stock: StockInfo, indicators: Dict[str, Any], alert: Dict[s
 最近3日放量天数：{indicators.get("recent_volume_spike_days", 0)}
 过去20日平均成交额（日元）：{fmt_num(indicators.get("avg_turnover_20d"))}
 
-{build_trade_recommendation(alert["type"], indicators)}
+原始触发信号：
+{build_raw_alert_lines(combined_alert.get("raw_alerts", []))}
+
+综合判断：
+中期判断：
+{combined_alert["medium_term_view"]}
+
+短期判断：
+{combined_alert["short_term_view"]}
+
+建议动作：
+{combined_alert["recommendation"]}
+
 提醒：这不是自动交易，也不是确定买卖指令，只是观察名单提醒，需要人工确认。
 """
 
@@ -671,12 +1059,14 @@ def print_report(rows: List[Dict[str, Any]]) -> None:
         "above200",
         "rel3m",
         "turnover20d_jpy",
-        "alerts",
+        "raw_alerts",
+        "combined",
     ]
     table_rows = []
     for row in rows:
         indicators = row["indicators"]
-        alerts = row["alerts"]
+        raw_alerts = row["raw_alerts"]
+        combined_alert = row["combined_alert"]
         table_rows.append(
             {
                 "ticker": row["stock"].ticker,
@@ -687,7 +1077,8 @@ def print_report(rows: List[Dict[str, Any]]) -> None:
                 "above200": "Y" if indicators.get("above_ma200") else "N",
                 "rel3m": fmt_pct(indicators.get("relative_topix_3m_pct")),
                 "turnover20d_jpy": fmt_num(indicators.get("avg_turnover_20d")),
-                "alerts": ",".join(alert["type"] for alert in alerts) if alerts else "-",
+                "raw_alerts": ",".join(alert["type"] for alert in raw_alerts) if raw_alerts else "-",
+                "combined": combined_alert["type"] if combined_alert else "-",
             }
         )
 
@@ -744,16 +1135,89 @@ def build_test_email_body() -> str:
 """
 
 
+def build_summary_email_body(
+    benchmark_ticker: str,
+    scanned_count: int,
+    success_count: int,
+    failed_count: int,
+    raw_alert_count: int,
+    combined_alerts: List[Dict[str, Any]],
+    sent_stock_count: int,
+    sector_alert_count: int,
+    sent_sector_count: int,
+    dry_run: bool,
+) -> str:
+    """Build the daily run summary email body."""
+    run_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S JST")
+    if combined_alerts:
+        alert_lines = "\n".join(
+            f"- {item['stock'].ticker} {item['stock'].name}: "
+            f"{item['combined_alert']['title']} / {item['combined_alert']['action_level']}"
+            for item in combined_alerts
+        )
+    else:
+        alert_lines = "今日无触发提醒。"
+
+    return f"""日本股票监控每日运行摘要
+
+运行时间 JST：{run_time}
+Benchmark ticker：{benchmark_ticker}
+扫描股票数量：{scanned_count}
+成功取得数据的股票数量：{success_count}
+数据获取失败数量：{failed_count}
+触发 raw alert 数量：{raw_alert_count}
+触发 combined alert 数量：{len(combined_alerts)}
+实际发送个股提醒邮件数量：{sent_stock_count}
+触发 sector heat 数量：{sector_alert_count}
+实际发送行业提醒邮件数量：{sent_sector_count}
+dry_run 状态：{dry_run}
+
+综合提醒摘要：
+{alert_lines}
+
+提醒：这不是投资建议，不是自动交易，也不是确定买卖指令，只是观察名单提醒，需要人工确认。
+"""
+
+
+def send_summary_email_if_needed(config: Dict[str, Any], args: argparse.Namespace, body: str) -> None:
+    """Send or print the daily summary when --summary-email is requested."""
+    if not args.summary_email:
+        return
+
+    subject = f"[日本股票监控] 每日运行摘要 - {datetime.now(JST).strftime('%Y-%m-%d')}"
+    if args.dry_run:
+        print("=" * 80)
+        print(subject)
+        print(body)
+        return
+
+    send_email(config, subject, body)
+    logging.info("Summary email sent")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monitor Japanese stock pullbacks and relative strength.")
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
     parser.add_argument("--dry-run", action="store_true", help="Print alerts without sending email")
     parser.add_argument("--report", action="store_true", help="Print a compact indicator report for all processed stocks")
+    parser.add_argument("--summary-email", action="store_true", help="Send a daily run summary email")
     parser.add_argument("--test-email", action="store_true", help="Send a test email and exit")
+    parser.add_argument("--export-signals", action="store_true", help="Write combined stock alerts to the signal CSV log")
+    parser.add_argument("--signal-log", default=None, help="Override signal CSV log path")
+    parser.add_argument("--log-signals-dry-run", action="store_true", help="Allow dry-run to write signal CSV rows")
     args = parser.parse_args()
 
     config = load_config(args.config)
     setup_logging(config.get("log_file", "monitor.log"))
+    run_datetime = datetime.now(JST)
+    signal_settings = signal_log_settings(config, args)
+    should_write_signal_log = signal_settings["enabled"] and (not args.dry_run or args.log_signals_dry_run)
+    logging.info(
+        "Signal log %s. path=%s dry_run_write=%s",
+        "enabled" if signal_settings["enabled"] else "disabled",
+        signal_settings["path"],
+        bool(args.log_signals_dry_run),
+    )
 
     if args.test_email:
         send_email(config, "[日本股票监控] SMTP 测试", build_test_email_body())
@@ -769,52 +1233,79 @@ def main() -> None:
     stocks = flatten_stock_pool(config)
     sector_results: Dict[str, List[Tuple[StockInfo, Dict[str, Any]]]] = {}
     report_rows: List[Dict[str, Any]] = []
-    sent_count = 0
-    triggered_count = 0
+    stock_alert_items: List[Dict[str, Any]] = []
+    signal_log_rows: List[Dict[str, Any]] = []
+    raw_alert_count = 0
+    success_count = 0
+    failed_count = 0
+    sent_stock_count = 0
+    sent_sector_count = 0
+    summary_only = args.summary_email and not args.dry_run and not args.report
 
     for stock in stocks:
         logging.info("Processing %s %s", stock.ticker, stock.name)
         data = fetch_price_data(stock.ticker)
         if data is None:
+            failed_count += 1
             continue
 
         try:
             indicators = calculate_indicators(data)
             indicators.update(calculate_relative_strength(indicators, topix_data))
+            success_count += 1
             sector_results.setdefault(stock.sector, []).append((stock, indicators))
-            alerts = check_alert_conditions(stock, indicators, thresholds, state)
-            report_rows.append({"stock": stock, "indicators": indicators, "alerts": alerts})
+            raw_alerts = check_alert_conditions(stock, indicators, thresholds, state)
+            raw_alert_count += len(raw_alerts)
+            combined_alert = combine_stock_alerts(stock, indicators, raw_alerts)
+            report_rows.append(
+                {
+                    "stock": stock,
+                    "indicators": indicators,
+                    "raw_alerts": raw_alerts,
+                    "combined_alert": combined_alert,
+                }
+            )
         except Exception as exc:
             logging.exception("Failed to process %s: %s", stock.ticker, exc)
+            failed_count += 1
             continue
 
-        if not alerts:
+        if not combined_alert:
             logging.info("No alert for %s", stock.ticker)
             continue
 
-        for alert in alerts:
-            triggered_count += 1
-            prefix = alert_action_prefix(alert["type"])
-            subject = f"[日本股票监控][{prefix}] {alert['title']} - {stock.ticker} {stock.name}"
-            body = build_email_body(stock, indicators, alert)
+        if not should_send_alert(state, stock.ticker, combined_alert["type"], indicators, thresholds):
+            logging.info("Alert for %s %s suppressed by dedup state", stock.ticker, combined_alert["type"])
+            continue
 
-            if args.dry_run:
-                print("=" * 80)
-                print(subject)
-                print(body)
-            else:
-                try:
-                    send_email(config, subject, body)
-                    sent_count += 1
-                    logging.info("Email sent for %s %s", stock.ticker, alert["type"])
-                except Exception as exc:
-                    logging.exception("Failed to send email for %s: %s", stock.ticker, exc)
-                    continue
+        stock_alert_items.append(
+            {
+                "stock": stock,
+                "indicators": indicators,
+                "combined_alert": combined_alert,
+            }
+        )
+        signal_log_rows.append(build_signal_log_row(stock, indicators, combined_alert, run_datetime))
+        prefix = combined_alert["action_prefix"]
+        subject = f"[日本股票监控][{prefix}] {combined_alert['title']} - {stock.ticker} {stock.name}"
+        body = build_email_body(stock, indicators, combined_alert)
 
-            record_alert_state(state, stock.ticker, alert["type"], indicators)
+        if args.dry_run:
+            print("=" * 80)
+            print(subject)
+            print(body)
+        elif not args.report and not summary_only:
+            try:
+                send_email(config, subject, body)
+                sent_stock_count += 1
+                record_alert_state(state, stock.ticker, combined_alert["type"], indicators)
+                logging.info("Email sent for %s %s", stock.ticker, combined_alert["type"])
+            except Exception as exc:
+                logging.exception("Failed to send email for %s: %s", stock.ticker, exc)
+                continue
 
-    for sector_alert in check_sector_heat_conditions(sector_results, thresholds, state):
-        triggered_count += 1
+    sector_alerts = check_sector_heat_conditions(sector_results, thresholds, state)
+    for sector_alert in sector_alerts:
         prefix = alert_action_prefix(sector_alert["type"])
         subject = f"[日本股票监控][{prefix}] {sector_alert['title']} - {sector_alert['sector']}"
         body = build_sector_heat_email_body(sector_alert)
@@ -823,33 +1314,65 @@ def main() -> None:
             print("=" * 80)
             print(subject)
             print(body)
-        else:
+        elif not args.report and not summary_only:
             try:
                 send_email(config, subject, body)
-                sent_count += 1
+                sent_sector_count += 1
+                record_alert_state(
+                    state,
+                    sector_alert["sector"],
+                    sector_alert["type"],
+                    {"drawdown_pct": 0, "high_52w": None, "current_price": None},
+                )
                 logging.info("Sector heat email sent for %s", sector_alert["sector"])
             except Exception as exc:
                 logging.exception("Failed to send sector heat email for %s: %s", sector_alert["sector"], exc)
                 continue
 
-        record_alert_state(
-            state,
-            sector_alert["sector"],
-            sector_alert["type"],
-            {"drawdown_pct": 0, "high_52w": None, "current_price": None},
-        )
-
     if args.report:
         print_report(report_rows)
 
-    save_state(state, state_file)
-    logging.info(
-        "Finished. Benchmark=%s, triggered=%d, sent=%d, dry_run=%s",
-        topix_ticker,
-        triggered_count,
-        sent_count,
-        args.dry_run,
+    summary_body = build_summary_email_body(
+        benchmark_ticker=topix_ticker,
+        scanned_count=len(stocks),
+        success_count=success_count,
+        failed_count=failed_count,
+        raw_alert_count=raw_alert_count,
+        combined_alerts=stock_alert_items,
+        sent_stock_count=sent_stock_count,
+        sector_alert_count=len(sector_alerts),
+        sent_sector_count=sent_sector_count,
+        dry_run=args.dry_run,
     )
+    send_summary_email_if_needed(config, args, summary_body)
+
+    logging.info("Signal log rows prepared: %d", len(signal_log_rows))
+    if should_write_signal_log:
+        existing_count = len(load_existing_signal_ids(signal_settings["path"]))
+        appended_count = append_signal_log_rows(signal_settings["path"], signal_log_rows)
+        skipped_count = max(len(signal_log_rows) - appended_count, 0)
+        logging.info("Signal log path: %s", signal_settings["path"])
+        logging.info("Signal log rows appended: %d", appended_count)
+        logging.info("Signal log duplicate rows skipped: %d", skipped_count)
+        logging.info("Signal log existing ids before append: %d", existing_count)
+    else:
+        logging.info("Signal log disabled for this run.")
+
+    if args.dry_run or args.report or summary_only:
+        logging.info("Dry run: state not saved." if args.dry_run else "Read-only run: state not saved.")
+    else:
+        save_state(state, state_file)
+
+    logging.info(
+        "Finished. Benchmark=%s, raw_triggered=%d, combined_triggered=%d, stock_sent=%d, sector_triggered=%d, sector_sent=%d, dry_run=%s",
+        topix_ticker,
+        raw_alert_count,
+        len(stock_alert_items),
+        sent_stock_count,
+        len(sector_alerts),
+        sent_sector_count,
+        args.dry_run,
+        )
 
 
 if __name__ == "__main__":
