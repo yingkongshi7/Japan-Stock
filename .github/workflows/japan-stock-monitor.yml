@@ -2,7 +2,8 @@ name: Japan Stock Monitor
 
 on:
   schedule:
-    - cron: "30 7 * * 1-5"
+    - cron: "17 8 * * 1-5"
+    - cron: "47 9 * * 1-5"
   workflow_dispatch:
     inputs:
       mode:
@@ -15,12 +16,13 @@ on:
           - dry-run
           - report
           - test-email
+          - summary-email
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - name: Checkout
@@ -30,14 +32,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Restore alert state
-        uses: actions/cache@v4
-        with:
-          path: alert_state.json
-          key: alert-state-${{ github.run_id }}
-          restore-keys: |
-            alert-state-
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -52,14 +46,24 @@ jobs:
           fi
 
           if [ "$MODE" = "dry-run" ]; then
-            python stock_monitor.py --dry-run
+            python stock_monitor.py --dry-run --report
           elif [ "$MODE" = "report" ]; then
             python stock_monitor.py --report
           elif [ "$MODE" = "test-email" ]; then
             python stock_monitor.py --test-email
+          elif [ "$MODE" = "summary-email" ]; then
+            python stock_monitor.py --summary-email
           else
             python stock_monitor.py
           fi
+
+      - name: Commit alert state
+        if: github.event_name == 'schedule' || github.event.inputs.mode == 'normal'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add alert_state.json stock_signal_log.csv 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "update stock monitor state and signal log" && git push)
 
       - name: Upload log
         if: always()
@@ -74,4 +78,12 @@ jobs:
         with:
           name: alert-state
           path: alert_state.json
+          if-no-files-found: warn
+
+      - name: Upload signal log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-signal-log
+          path: stock_signal_log.csv
           if-no-files-found: warn
