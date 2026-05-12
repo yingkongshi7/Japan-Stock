@@ -470,6 +470,31 @@ def signal_log_settings(config: Dict[str, Any], args: argparse.Namespace) -> Dic
     return {"enabled": enabled, "path": path, "append_only": append_only}
 
 
+def email_policy_settings(config: Dict[str, Any]) -> Dict[str, Any]:
+    policy = config.get("email_policy", {}) or {}
+    return {
+        "daily_summary_default": bool(policy.get("daily_summary_default", True)),
+        "send_individual_alerts": bool(policy.get("send_individual_alerts", True)),
+        "individual_alert_types": set(
+            policy.get(
+                "individual_alert_types",
+                [
+                    "weak_deep_pullback",
+                    "pullback_but_overheated",
+                    "breakout_but_overheated",
+                    "pullback_watch",
+                    "deep_pullback_trend_intact",
+                ],
+            )
+        ),
+        "send_sector_heat_individual": bool(policy.get("send_sector_heat_individual", False)),
+    }
+
+
+def should_send_individual_alert(combined_alert: Dict[str, Any], policy: Dict[str, Any]) -> bool:
+    return bool(policy["send_individual_alerts"] and combined_alert["type"] in policy["individual_alert_types"])
+
+
 def prune_old_state(state: Dict[str, Any], dedup_days: int) -> None:
     cutoff = datetime.now(JST).date() - timedelta(days=dedup_days * 2)
     alerts = state.get("alerts", {})
@@ -1146,6 +1171,7 @@ def build_summary_email_body(
     sector_alert_count: int,
     sent_sector_count: int,
     dry_run: bool,
+    sector_alerts: List[Dict[str, Any]],
 ) -> str:
     """Build the daily run summary email body."""
     run_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S JST")
@@ -1157,6 +1183,16 @@ def build_summary_email_body(
         )
     else:
         alert_lines = "今日无触发提醒。"
+
+    if sector_alerts:
+        sector_lines = "\n".join(
+            f"- {alert['sector']}: {alert['title']} "
+            f"(60日新高比例 {fmt_pct(alert['high_60d_ratio'] * 100)}, "
+            f"20日跑赢比例 {fmt_pct(alert['outperformer_ratio'] * 100)})"
+            for alert in sector_alerts
+        )
+    else:
+        sector_lines = "今日无行业热度提醒。"
 
     return f"""日本股票监控每日运行摘要
 
@@ -1174,6 +1210,9 @@ dry_run 状态：{dry_run}
 
 综合提醒摘要：
 {alert_lines}
+
+行业热度摘要：
+{sector_lines}
 
 提醒：这不是投资建议，不是自动交易，也不是确定买卖指令，只是观察名单提醒，需要人工确认。
 """
@@ -1211,6 +1250,8 @@ def main() -> None:
     setup_logging(config.get("log_file", "monitor.log"))
     run_datetime = datetime.now(JST)
     signal_settings = signal_log_settings(config, args)
+    email_policy = email_policy_settings(config)
+    summary_requested = bool(args.summary_email or email_policy["daily_summary_default"])
     should_write_signal_log = signal_settings["enabled"] and (not args.dry_run or args.log_signals_dry_run)
     logging.info(
         "Signal log %s. path=%s dry_run_write=%s",
@@ -1289,12 +1330,15 @@ def main() -> None:
         prefix = combined_alert["action_prefix"]
         subject = f"[日本股票监控][{prefix}] {combined_alert['title']} - {stock.ticker} {stock.name}"
         body = build_email_body(stock, indicators, combined_alert)
+        send_individual = should_send_individual_alert(combined_alert, email_policy)
 
-        if args.dry_run:
+        if args.dry_run and send_individual:
             print("=" * 80)
             print(subject)
             print(body)
-        elif not args.report and not summary_only:
+        elif args.dry_run:
+            logging.info("Individual email suppressed by policy for %s %s", stock.ticker, combined_alert["type"])
+        elif not args.report and not summary_only and send_individual:
             try:
                 send_email(config, subject, body)
                 sent_stock_count += 1
@@ -1303,6 +1347,8 @@ def main() -> None:
             except Exception as exc:
                 logging.exception("Failed to send email for %s: %s", stock.ticker, exc)
                 continue
+        else:
+            logging.info("Individual email suppressed by policy for %s %s", stock.ticker, combined_alert["type"])
 
     sector_alerts = check_sector_heat_conditions(sector_results, thresholds, state)
     for sector_alert in sector_alerts:
@@ -1310,11 +1356,14 @@ def main() -> None:
         subject = f"[日本股票监控][{prefix}] {sector_alert['title']} - {sector_alert['sector']}"
         body = build_sector_heat_email_body(sector_alert)
 
-        if args.dry_run:
+        send_sector_individual = bool(email_policy["send_sector_heat_individual"])
+        if args.dry_run and send_sector_individual:
             print("=" * 80)
             print(subject)
             print(body)
-        elif not args.report and not summary_only:
+        elif args.dry_run:
+            logging.info("Sector heat individual email suppressed by policy for %s", sector_alert["sector"])
+        elif not args.report and not summary_only and send_sector_individual:
             try:
                 send_email(config, subject, body)
                 sent_sector_count += 1
@@ -1328,6 +1377,8 @@ def main() -> None:
             except Exception as exc:
                 logging.exception("Failed to send sector heat email for %s: %s", sector_alert["sector"], exc)
                 continue
+        else:
+            logging.info("Sector heat individual email suppressed by policy for %s", sector_alert["sector"])
 
     if args.report:
         print_report(report_rows)
@@ -1343,8 +1394,16 @@ def main() -> None:
         sector_alert_count=len(sector_alerts),
         sent_sector_count=sent_sector_count,
         dry_run=args.dry_run,
+        sector_alerts=sector_alerts,
     )
-    send_summary_email_if_needed(config, args, summary_body)
+    if summary_requested:
+        if args.dry_run:
+            print("=" * 80)
+            print(f"[日本股票监控] 每日运行摘要 - {datetime.now(JST).strftime('%Y-%m-%d')}")
+            print(summary_body)
+        elif not args.report:
+            send_email(config, f"[日本股票监控] 每日运行摘要 - {datetime.now(JST).strftime('%Y-%m-%d')}", summary_body)
+            logging.info("Summary email sent")
 
     logging.info("Signal log rows prepared: %d", len(signal_log_rows))
     if should_write_signal_log:

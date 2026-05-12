@@ -56,6 +56,27 @@ Manual `workflow_dispatch` modes:
 - `test-email`: `python stock_monitor.py --test-email`
 - `summary-email`: `python stock_monitor.py --summary-email`
 
+## Email Policy
+
+The default email policy is summary-first to reduce inbox noise:
+
+```yaml
+email_policy:
+  daily_summary_default: true
+  send_individual_alerts: true
+  individual_alert_types:
+    - weak_deep_pullback
+    - pullback_but_overheated
+    - breakout_but_overheated
+    - pullback_watch
+    - deep_pullback_trend_intact
+  send_sector_heat_individual: false
+```
+
+Normal runs send one daily summary by default. Individual stock emails are sent only for higher-priority combined signals. `overheat_risk`, `trend_weakness`, and `sector_heat` are still recorded in the CSV and included in the summary, but they do not send separate emails by default.
+
+This keeps the daily email volume closer to 1-3 messages while preserving the full signal history in `stock_signal_log.csv`.
+
 ## State Handling
 
 `dry-run` does not save `alert_state.json` and will not pollute deduplication state.
