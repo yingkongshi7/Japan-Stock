@@ -77,6 +77,8 @@ Normal runs send one daily summary by default. Individual stock emails are sent 
 
 This keeps the daily email volume closer to 1-3 messages while preserving the full signal history in `stock_signal_log.csv`.
 
+Daily summaries are also deduplicated in `alert_state.json` by JST date, so the backup schedule should not send the same summary twice. The workflow uses GitHub Actions concurrency to avoid overlapping monitor runs on the same branch.
+
 ## State Handling
 
 `dry-run` does not save `alert_state.json` and will not pollute deduplication state.

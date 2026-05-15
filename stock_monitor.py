@@ -563,6 +563,16 @@ def record_alert_state(state: Dict[str, Any], ticker: str, alert_type: str, indi
     }
 
 
+def summary_email_already_sent(state: Dict[str, Any], summary_date: str) -> bool:
+    return summary_date in state.setdefault("summary_emails", {})
+
+
+def record_summary_email_state(state: Dict[str, Any], summary_date: str) -> None:
+    state.setdefault("summary_emails", {})[summary_date] = {
+        "sent_at_jst": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S JST")
+    }
+
+
 def reset_drawdown_alerts_on_new_high(state: Dict[str, Any], ticker: str) -> None:
     for alert_type in (
         "pullback_watch",
@@ -1249,6 +1259,7 @@ def main() -> None:
     config = load_config(args.config)
     setup_logging(config.get("log_file", "monitor.log"))
     run_datetime = datetime.now(JST)
+    summary_date = run_datetime.strftime("%Y-%m-%d")
     signal_settings = signal_log_settings(config, args)
     email_policy = email_policy_settings(config)
     summary_requested = bool(args.summary_email or email_policy["daily_summary_default"])
@@ -1399,11 +1410,15 @@ def main() -> None:
     if summary_requested:
         if args.dry_run:
             print("=" * 80)
-            print(f"[日本股票监控] 每日运行摘要 - {datetime.now(JST).strftime('%Y-%m-%d')}")
+            print(f"[日本股票监控] 每日运行摘要 - {summary_date}")
             print(summary_body)
         elif not args.report:
-            send_email(config, f"[日本股票监控] 每日运行摘要 - {datetime.now(JST).strftime('%Y-%m-%d')}", summary_body)
-            logging.info("Summary email sent")
+            if not args.summary_email and summary_email_already_sent(state, summary_date):
+                logging.info("Summary email for %s already sent; suppressed duplicate.", summary_date)
+            else:
+                send_email(config, f"[日本股票监控] 每日运行摘要 - {summary_date}", summary_body)
+                record_summary_email_state(state, summary_date)
+                logging.info("Summary email sent")
 
     logging.info("Signal log rows prepared: %d", len(signal_log_rows))
     if should_write_signal_log:
