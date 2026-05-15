@@ -18,6 +18,10 @@ on:
           - test-email
           - summary-email
 
+concurrency:
+  group: japan-stock-monitor-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
