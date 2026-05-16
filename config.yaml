@@ -15,6 +15,10 @@ signal_log:
 email_policy:
   daily_summary_default: true
   send_individual_alerts: true
+  notify_action_levels:
+    - A
+    - B
+  send_summary_when_no_notify_alerts: false
   individual_alert_types:
     - weak_deep_pullback
     - pullback_but_overheated
@@ -27,12 +31,12 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: hailuwang71@gmail.com
+  username: your_email@example.com
 
 email:
-  from: hailuwang71@gmail.com
+  from: your_email@example.com
   to:
-    - hailuwang71@gmail.com
+    - your_email@example.com
 
 thresholds:
   pullback_min_pct: 20

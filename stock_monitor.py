@@ -475,6 +475,8 @@ def email_policy_settings(config: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "daily_summary_default": bool(policy.get("daily_summary_default", True)),
         "send_individual_alerts": bool(policy.get("send_individual_alerts", True)),
+        "notify_action_levels": set(str(level).strip() for level in policy.get("notify_action_levels", ["A", "B"])),
+        "send_summary_when_no_notify_alerts": bool(policy.get("send_summary_when_no_notify_alerts", False)),
         "individual_alert_types": set(
             policy.get(
                 "individual_alert_types",
@@ -491,8 +493,18 @@ def email_policy_settings(config: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def action_level_code(action_level: str) -> str:
+    return action_level.split("：", 1)[0].strip()
+
+
+def is_notify_level(combined_alert: Dict[str, Any], email_policy: Dict[str, Any]) -> bool:
+    level = action_level_code(combined_alert.get("action_level", ""))
+    return level in email_policy["notify_action_levels"]
+
+
 def should_send_individual_alert(combined_alert: Dict[str, Any], policy: Dict[str, Any]) -> bool:
-    return bool(policy["send_individual_alerts"] and combined_alert["type"] in policy["individual_alert_types"])
+    allowed_by_type = combined_alert["type"] in policy["individual_alert_types"]
+    return bool(policy["send_individual_alerts"] and allowed_by_type and is_notify_level(combined_alert, policy))
 
 
 def prune_old_state(state: Dict[str, Any], dedup_days: int) -> None:
@@ -571,6 +583,33 @@ def record_summary_email_state(state: Dict[str, Any], summary_date: str) -> None
     state.setdefault("summary_emails", {})[summary_date] = {
         "sent_at_jst": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S JST")
     }
+
+
+def daily_run_completed(state: Dict[str, Any], run_date: str) -> bool:
+    return bool(state.setdefault("daily_runs", {}).get(run_date, {}).get("completed_at_jst"))
+
+
+def record_daily_run_state(
+    state: Dict[str, Any],
+    run_date: str,
+    sent_summary: bool,
+    sent_stock_count: int,
+) -> None:
+    state.setdefault("daily_runs", {})[run_date] = {
+        "completed_at_jst": datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S JST"),
+        "sent_summary": bool(sent_summary),
+        "sent_stock_count": sent_stock_count,
+    }
+
+
+def is_scheduled_normal_run(args: argparse.Namespace) -> bool:
+    return (
+        os.environ.get("GITHUB_EVENT_NAME") == "schedule"
+        and not args.dry_run
+        and not args.report
+        and not args.summary_email
+        and not args.test_email
+    )
 
 
 def reset_drawdown_alerts_on_new_high(state: Dict[str, Any], ticker: str) -> None:
@@ -1182,6 +1221,7 @@ def build_summary_email_body(
     sent_sector_count: int,
     dry_run: bool,
     sector_alerts: List[Dict[str, Any]],
+    summary_scope: str,
 ) -> str:
     """Build the daily run summary email body."""
     run_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S JST")
@@ -1218,7 +1258,7 @@ Benchmark ticker：{benchmark_ticker}
 实际发送行业提醒邮件数量：{sent_sector_count}
 dry_run 状态：{dry_run}
 
-综合提醒摘要：
+综合提醒摘要（{summary_scope}）：
 {alert_lines}
 
 行业热度摘要：
@@ -1280,12 +1320,16 @@ def main() -> None:
     state = load_state(state_file)
     thresholds = config["thresholds"]
     prune_old_state(state, int(thresholds.get("dedup_days", 30)))
+    if is_scheduled_normal_run(args) and daily_run_completed(state, summary_date):
+        logging.info("Daily run for %s already completed; exiting without sending mail.", summary_date)
+        return
 
     topix_ticker, topix_data = fetch_topix_data(config.get("topix_candidates", ["^TOPX", "1306.T"]))
     stocks = flatten_stock_pool(config)
     sector_results: Dict[str, List[Tuple[StockInfo, Dict[str, Any]]]] = {}
     report_rows: List[Dict[str, Any]] = []
     stock_alert_items: List[Dict[str, Any]] = []
+    notify_alert_items: List[Dict[str, Any]] = []
     signal_log_rows: List[Dict[str, Any]] = []
     raw_alert_count = 0
     success_count = 0
@@ -1337,6 +1381,14 @@ def main() -> None:
                 "combined_alert": combined_alert,
             }
         )
+        if is_notify_level(combined_alert, email_policy):
+            notify_alert_items.append(
+                {
+                    "stock": stock,
+                    "indicators": indicators,
+                    "combined_alert": combined_alert,
+                }
+            )
         signal_log_rows.append(build_signal_log_row(stock, indicators, combined_alert, run_datetime))
         prefix = combined_alert["action_prefix"]
         subject = f"[日本股票监控][{prefix}] {combined_alert['title']} - {stock.ticker} {stock.name}"
@@ -1394,20 +1446,32 @@ def main() -> None:
     if args.report:
         print_report(report_rows)
 
+    summary_alert_items = stock_alert_items if args.summary_email else notify_alert_items
+    summary_sector_alerts = sector_alerts if args.summary_email else []
     summary_body = build_summary_email_body(
         benchmark_ticker=topix_ticker,
         scanned_count=len(stocks),
         success_count=success_count,
         failed_count=failed_count,
         raw_alert_count=raw_alert_count,
-        combined_alerts=stock_alert_items,
+        combined_alerts=summary_alert_items,
         sent_stock_count=sent_stock_count,
         sector_alert_count=len(sector_alerts),
         sent_sector_count=sent_sector_count,
         dry_run=args.dry_run,
-        sector_alerts=sector_alerts,
+        sector_alerts=summary_sector_alerts,
+        summary_scope="全部信号" if args.summary_email else "A/B通知信号",
     )
-    if summary_requested:
+    summary_sent = False
+    should_send_summary = summary_requested and (
+        args.summary_email
+        or bool(summary_alert_items)
+        or email_policy["send_summary_when_no_notify_alerts"]
+    )
+    if summary_requested and not should_send_summary:
+        logging.info("Summary email suppressed because there are no notify-level alerts.")
+
+    if should_send_summary:
         if args.dry_run:
             print("=" * 80)
             print(f"[日本股票监控] 每日运行摘要 - {summary_date}")
@@ -1418,6 +1482,7 @@ def main() -> None:
             else:
                 send_email(config, f"[日本股票监控] 每日运行摘要 - {summary_date}", summary_body)
                 record_summary_email_state(state, summary_date)
+                summary_sent = True
                 logging.info("Summary email sent")
 
     logging.info("Signal log rows prepared: %d", len(signal_log_rows))
@@ -1431,6 +1496,9 @@ def main() -> None:
         logging.info("Signal log existing ids before append: %d", existing_count)
     else:
         logging.info("Signal log disabled for this run.")
+
+    if not (args.dry_run or args.report or summary_only):
+        record_daily_run_state(state, summary_date, summary_sent, sent_stock_count)
 
     if args.dry_run or args.report or summary_only:
         logging.info("Dry run: state not saved." if args.dry_run else "Read-only run: state not saved.")

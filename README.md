@@ -64,6 +64,10 @@ The default email policy is summary-first to reduce inbox noise:
 email_policy:
   daily_summary_default: true
   send_individual_alerts: true
+  notify_action_levels:
+    - A
+    - B
+  send_summary_when_no_notify_alerts: false
   individual_alert_types:
     - weak_deep_pullback
     - pullback_but_overheated
@@ -73,11 +77,11 @@ email_policy:
   send_sector_heat_individual: false
 ```
 
-Normal runs send one daily summary by default. Individual stock emails are sent only for higher-priority combined signals. `overheat_risk`, `trend_weakness`, and `sector_heat` are still recorded in the CSV and included in the summary, but they do not send separate emails by default.
+Normal runs send one daily summary by default only when there are notify-level signals. Individual stock emails are sent only for higher-priority combined signals. `overheat_risk`, `trend_weakness`, and `sector_heat` are still recorded in the CSV and logs, but they do not send separate emails and do not appear in the ordinary daily summary by default.
 
-This keeps the daily email volume closer to 1-3 messages while preserving the full signal history in `stock_signal_log.csv`.
+The ordinary scheduled notification now focuses on A/B action levels. C/D/E signals are still recorded in `stock_signal_log.csv` and logs, but they do not appear in the normal daily notification. To restore C-level emails and summary entries, add `C` to `notify_action_levels`.
 
-Daily summaries are also deduplicated in `alert_state.json` by JST date, so the backup schedule should not send the same summary twice. The workflow uses GitHub Actions concurrency to avoid overlapping monitor runs on the same branch.
+Daily runs are deduplicated in `alert_state.json` under `daily_runs` by JST date. The primary and backup schedules can both exist, but after one scheduled normal run completes, the backup run exits without sending mail. The workflow also uses GitHub Actions concurrency to avoid overlapping monitor runs on the same branch.
 
 ## State Handling
 
