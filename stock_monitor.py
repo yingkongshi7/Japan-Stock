@@ -602,10 +602,9 @@ def record_daily_run_state(
     }
 
 
-def is_scheduled_normal_run(args: argparse.Namespace) -> bool:
+def is_stateful_normal_run(args: argparse.Namespace) -> bool:
     return (
-        os.environ.get("GITHUB_EVENT_NAME") == "schedule"
-        and not args.dry_run
+        not args.dry_run
         and not args.report
         and not args.summary_email
         and not args.test_email
@@ -1320,7 +1319,7 @@ def main() -> None:
     state = load_state(state_file)
     thresholds = config["thresholds"]
     prune_old_state(state, int(thresholds.get("dedup_days", 30)))
-    if is_scheduled_normal_run(args) and daily_run_completed(state, summary_date):
+    if is_stateful_normal_run(args) and daily_run_completed(state, summary_date):
         logging.info("Daily run for %s already completed; exiting without sending mail.", summary_date)
         return
 

@@ -81,7 +81,7 @@ Normal runs send one daily summary by default only when there are notify-level s
 
 The ordinary scheduled notification now focuses on A/B action levels. C/D/E signals are still recorded in `stock_signal_log.csv` and logs, but they do not appear in the normal daily notification. To restore C-level emails and summary entries, add `C` to `notify_action_levels`.
 
-Daily runs are deduplicated in `alert_state.json` under `daily_runs` by JST date. The primary and backup schedules can both exist, but after one scheduled normal run completes, the backup run exits without sending mail. The workflow also uses GitHub Actions concurrency to avoid overlapping monitor runs on the same branch.
+Daily runs are deduplicated in `alert_state.json` under `daily_runs` by JST date. The primary and backup schedules can both exist, but after one normal run completes, the backup run exits without sending mail. The workflow pulls the latest branch state before running the script and uses GitHub Actions concurrency to avoid overlapping monitor runs on the same branch.
 
 ## State Handling
 
