@@ -31,6 +31,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Sync latest state
+        run: git pull --rebase origin "$GITHUB_REF_NAME"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -66,7 +72,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git pull --rebase --autostash
+          git pull --rebase --autostash origin "$GITHUB_REF_NAME"
           git add alert_state.json stock_signal_log.csv 2>/dev/null || true
           git diff --cached --quiet || (git commit -m "update stock monitor state and signal log" && git push)
 
