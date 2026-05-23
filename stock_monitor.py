@@ -477,18 +477,6 @@ def email_policy_settings(config: Dict[str, Any]) -> Dict[str, Any]:
         "send_individual_alerts": bool(policy.get("send_individual_alerts", True)),
         "notify_action_levels": set(str(level).strip() for level in policy.get("notify_action_levels", ["A", "B"])),
         "send_summary_when_no_notify_alerts": bool(policy.get("send_summary_when_no_notify_alerts", False)),
-        "individual_alert_types": set(
-            policy.get(
-                "individual_alert_types",
-                [
-                    "weak_deep_pullback",
-                    "pullback_but_overheated",
-                    "breakout_but_overheated",
-                    "pullback_watch",
-                    "deep_pullback_trend_intact",
-                ],
-            )
-        ),
         "send_sector_heat_individual": bool(policy.get("send_sector_heat_individual", False)),
     }
 
@@ -503,8 +491,7 @@ def is_notify_level(combined_alert: Dict[str, Any], email_policy: Dict[str, Any]
 
 
 def should_send_individual_alert(combined_alert: Dict[str, Any], policy: Dict[str, Any]) -> bool:
-    allowed_by_type = combined_alert["type"] in policy["individual_alert_types"]
-    return bool(policy["send_individual_alerts"] and allowed_by_type and is_notify_level(combined_alert, policy))
+    return bool(policy["send_individual_alerts"] and is_notify_level(combined_alert, policy))
 
 
 def prune_old_state(state: Dict[str, Any], dedup_days: int) -> None:
@@ -981,14 +968,42 @@ def build_raw_alert_lines(raw_alerts: List[Dict[str, str]]) -> str:
     return "\n".join(f"- {alert['type']}：{alert['title']}" for alert in raw_alerts) or "- 无"
 
 
-def build_email_body(stock: StockInfo, indicators: Dict[str, Any], combined_alert: Dict[str, Any]) -> str:
+def build_entry_standard(combined_alert: Dict[str, Any], thresholds: Dict[str, Any]) -> str:
+    alert_type = combined_alert.get("type", "")
+    if alert_type == "deep_pullback_trend_intact":
+        return f"""本次入选标准：
+- 等级：A，重点研究。
+- 回撤要求：从 52 周高点回撤 ≥ {float(thresholds.get("deep_pullback_min_pct", 35)):g}%。
+- 趋势要求：必须仍在 200 日线之上，趋势未坏。
+- 相对 TOPIX：过去 3 个月相对收益 > {float(thresholds.get("trend_intact_relative_3m_min_pct", -5)):g}%。
+- 流动性：没有单独要求。
+"""
+    if alert_type == "pullback_watch":
+        return f"""本次入选标准：
+- 等级：B，买入候选。
+- 回撤要求：从 52 周高点回撤在 {float(thresholds.get("pullback_min_pct", 20)):g}%～{float(thresholds.get("pullback_max_pct", 35)):g}% 之间。
+- 趋势要求：趋势未坏，或最近 5 个交易日重新站上 200 日线。
+- 相对 TOPIX：过去 3 个月相对收益 > {float(thresholds.get("relative_3m_min_pct", -10)):g}%。
+- 流动性：过去 20 日平均成交额 ≥ {fmt_num(float(thresholds.get("min_avg_turnover_20d_jpy", 0)))} 日元。
+"""
+    return "本次入选标准：按当前提醒类型的技术条件触发。\n"
+
+
+def build_email_body(
+    stock: StockInfo,
+    indicators: Dict[str, Any],
+    combined_alert: Dict[str, Any],
+    thresholds: Dict[str, Any],
+) -> str:
     above_ma200 = "是" if indicators.get("above_ma200") else "否"
     recent_cross = "是" if indicators.get("recent_cross_above_ma200") else "否"
     volume_spike = "是" if indicators.get("volume_spike") else "否"
+    entry_standard = build_entry_standard(combined_alert, thresholds)
 
     return f"""提醒类型：{combined_alert["title"]}
 操作等级：{combined_alert["action_level"]}
 
+{entry_standard}
 股票代码：{stock.ticker}
 股票名称：{stock.name}
 产业分类：{stock.sector}
@@ -1215,6 +1230,8 @@ def build_summary_email_body(
     failed_count: int,
     raw_alert_count: int,
     combined_alerts: List[Dict[str, Any]],
+    total_combined_alert_count: int,
+    notify_combined_alert_count: int,
     sent_stock_count: int,
     sector_alert_count: int,
     sent_sector_count: int,
@@ -1250,8 +1267,10 @@ Benchmark ticker：{benchmark_ticker}
 扫描股票数量：{scanned_count}
 成功取得数据的股票数量：{success_count}
 数据获取失败数量：{failed_count}
-触发 raw alert 数量：{raw_alert_count}
-触发 combined alert 数量：{len(combined_alerts)}
+触发 raw alert 总数量：{raw_alert_count}
+触发 combined alert 总数量：{total_combined_alert_count}
+A/B 通知信号数量：{notify_combined_alert_count}
+本摘要展示信号数量：{len(combined_alerts)}
 实际发送个股提醒邮件数量：{sent_stock_count}
 触发 sector heat 数量：{sector_alert_count}
 实际发送行业提醒邮件数量：{sent_sector_count}
@@ -1369,37 +1388,37 @@ def main() -> None:
             logging.info("No alert for %s", stock.ticker)
             continue
 
-        if not should_send_alert(state, stock.ticker, combined_alert["type"], indicators, thresholds):
-            logging.info("Alert for %s %s suppressed by dedup state", stock.ticker, combined_alert["type"])
-            continue
+        alert_item = {
+            "stock": stock,
+            "indicators": indicators,
+            "combined_alert": combined_alert,
+        }
+        stock_alert_items.append(alert_item)
 
-        stock_alert_items.append(
-            {
-                "stock": stock,
-                "indicators": indicators,
-                "combined_alert": combined_alert,
-            }
-        )
-        if is_notify_level(combined_alert, email_policy):
-            notify_alert_items.append(
-                {
-                    "stock": stock,
-                    "indicators": indicators,
-                    "combined_alert": combined_alert,
-                }
-            )
+        # CSV is the research log, not the email log. Record every combined signal,
+        # including C/D/E, without applying alert-state deduplication.
         signal_log_rows.append(build_signal_log_row(stock, indicators, combined_alert, run_datetime))
+
+        is_notify_alert = is_notify_level(combined_alert, email_policy)
+        dedup_allows_email = True
+        if is_notify_alert:
+            dedup_allows_email = should_send_alert(state, stock.ticker, combined_alert["type"], indicators, thresholds)
+            if dedup_allows_email:
+                notify_alert_items.append(alert_item)
+            else:
+                logging.info("Notify-level alert for %s %s suppressed by dedup state", stock.ticker, combined_alert["type"])
+
         prefix = combined_alert["action_prefix"]
         subject = f"[日本股票监控][{prefix}] {combined_alert['title']} - {stock.ticker} {stock.name}"
-        body = build_email_body(stock, indicators, combined_alert)
-        send_individual = should_send_individual_alert(combined_alert, email_policy)
+        body = build_email_body(stock, indicators, combined_alert, thresholds)
+        send_individual = should_send_individual_alert(combined_alert, email_policy) and dedup_allows_email
 
         if args.dry_run and send_individual:
             print("=" * 80)
             print(subject)
             print(body)
         elif args.dry_run:
-            logging.info("Individual email suppressed by policy for %s %s", stock.ticker, combined_alert["type"])
+            logging.info("Individual email suppressed by policy or dedup for %s %s", stock.ticker, combined_alert["type"])
         elif not args.report and not summary_only and send_individual:
             try:
                 send_email(config, subject, body)
@@ -1410,7 +1429,7 @@ def main() -> None:
                 logging.exception("Failed to send email for %s: %s", stock.ticker, exc)
                 continue
         else:
-            logging.info("Individual email suppressed by policy for %s %s", stock.ticker, combined_alert["type"])
+            logging.info("Individual email suppressed by policy or dedup for %s %s", stock.ticker, combined_alert["type"])
 
     sector_alerts = check_sector_heat_conditions(sector_results, thresholds, state)
     for sector_alert in sector_alerts:
@@ -1454,6 +1473,8 @@ def main() -> None:
         failed_count=failed_count,
         raw_alert_count=raw_alert_count,
         combined_alerts=summary_alert_items,
+        total_combined_alert_count=len(stock_alert_items),
+        notify_combined_alert_count=len(notify_alert_items),
         sent_stock_count=sent_stock_count,
         sector_alert_count=len(sector_alerts),
         sent_sector_count=sent_sector_count,

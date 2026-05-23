@@ -19,12 +19,6 @@ email_policy:
     - A
     - B
   send_summary_when_no_notify_alerts: false
-  individual_alert_types:
-    - weak_deep_pullback
-    - pullback_but_overheated
-    - breakout_but_overheated
-    - pullback_watch
-    - deep_pullback_trend_intact
   send_sector_heat_individual: false
 
 smtp:
