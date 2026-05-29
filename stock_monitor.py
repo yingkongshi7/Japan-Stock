@@ -1316,8 +1316,14 @@ def analyze_fundamentals(
     fcf = fundamentals.get("free_cash_flow")
     quality = fundamentals.get("data_quality", "missing")
 
+    # Do not upgrade partial yfinance data to "中" unless enough core
+    # operating/fundamental fields are actually available. Valuation-only
+    # data such as PER/PBR is not enough to judge business quality.
+    core_values = [rev_growth, op_growth, net_growth, op_margin, fcf]
+    available_core_count = sum(value is not None for value in core_values)
+
     status = "待确认"
-    if quality != "missing":
+    if quality != "missing" and available_core_count >= 3:
         if (
             rev_growth is not None and rev_growth * 100 > strong_rev
             and op_growth is not None and op_growth * 100 > strong_op
@@ -1345,7 +1351,10 @@ def analyze_fundamentals(
     if quality == "ok":
         note = "已获取部分可用财务数据，仍需人工核对分部收入、订单和指引口径。"
     elif quality == "partial":
-        note = "基本面数据部分可用，但关键字段仍缺失，需要人工补充确认。"
+        if available_core_count < 3:
+            note = "基本面数据部分可用，但营收增长、利润增长、利润率、现金流等核心字段不足，基本面状态保持待确认。"
+        else:
+            note = "基本面数据部分可用，但关键字段仍缺失，需要人工补充确认。"
 
     return {
         "revenue_growth": maybe_pct(rev_growth),
@@ -1363,6 +1372,7 @@ def analyze_fundamentals(
         "roe": maybe_pct(roe),
         "free_cash_flow": maybe_num(fcf),
         "data_quality": quality,
+        "available_core_count": available_core_count,
     }
 
 
@@ -1430,6 +1440,7 @@ def build_research_analysis(
     indicators: Dict[str, Any],
     config: Optional[Dict[str, Any]],
     fundamentals: Optional[Dict[str, Any]] = None,
+    alert_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     screening = config_section(
         config,
@@ -1454,7 +1465,21 @@ def build_research_analysis(
     high_theme = theme["relevance"] == "高"
     trend_broken = technical["classification"] == "趋势转坏预警"
 
-    if trend_broken:
+    # Alert-type gates come first. Risk alerts must not be upgraded just
+    # because the stock has a strong theme or is still above the 200-day MA.
+    if alert_type == "overheat_risk":
+        priority = "C"
+        final_action = "不宜追高，等待回调后再观察"
+        final_note = "该信号为过热风险提醒，不应因主题强或趋势强被提升为B。"
+    elif alert_type == "trend_weakness":
+        priority = "C"
+        final_action = "暂不关注"
+        final_note = "该信号为趋势转弱提醒，趋势风险优先于回撤幅度。"
+    elif alert_type == "weak_deep_pullback":
+        priority = "C"
+        final_action = "高风险复查，暂不买入"
+        final_note = "深度回撤叠加趋势转弱，不能简单理解为便宜。"
+    elif trend_broken:
         priority = "C"
         final_action = "暂不关注"
         final_note = "跌破200日线且无法收回，趋势风险优先于回撤幅度。"
@@ -1472,7 +1497,7 @@ def build_research_analysis(
         final_note = "技术和主题条件较强，但估值与基本面仍需人工确认；A级代表研究优先级高，不代表买入评级。"
     elif above_ma200 and (relative_3m is None or relative_3m >= min_relative):
         priority = "B"
-        final_action = "重点研究" if high_theme else "小额观察"
+        final_action = "加入观察池，等待财报确认"
         final_note = "部分条件满足，可进入观察池，但仍需确认估值、财报和仓位。"
     else:
         priority = "C"
@@ -1486,8 +1511,12 @@ def build_research_analysis(
             priority = "C"
         final_note = "基本面状态偏弱，研究优先级已下调。即使技术条件满足，也不应视为买入信号。"
 
+    if priority == "B" and (valuation.get("judgement") == "偏高" or position.get("exceeds_initial_limit")):
+        final_action = "加入观察池，暂不直接买入"
+        final_note += " 估值偏高或一手金额超过初始观察仓上限，应降低操作语气。"
+
     if fundamentals_data.get("data_quality") != "ok":
-        final_note += " 估值和基本面仍需人工确认，A级不是买入评级。"
+        final_note += " 估值和基本面仍需人工确认，A/B/C均为研究优先级，不是买入评级。"
 
     return {
         "priority": priority,
@@ -1644,7 +1673,9 @@ def build_email_body(
     config: Optional[Dict[str, Any]] = None,
     fundamentals: Optional[Dict[str, Any]] = None,
 ) -> str:
-    analysis = combined_alert.get("research_analysis") or build_research_analysis(stock, indicators, config, fundamentals)
+    analysis = combined_alert.get("research_analysis") or build_research_analysis(
+        stock, indicators, config, fundamentals, alert_type=combined_alert.get("type")
+    )
     technical = analysis["technical"]
     theme = analysis["theme"]
     valuation = analysis["valuation"]
@@ -1659,7 +1690,7 @@ def build_email_body(
 
 一、研究优先级：
 * {analysis['priority']}
-* 说明：{analysis['priority_note']} A级代表研究优先级高，不代表买入评级。
+* 说明：{analysis['priority_note']} A/B/C均为研究优先级，不是买入评级。
 * 原始触发信号：
 {build_raw_alert_lines(combined_alert.get('raw_alerts', []))}
 
@@ -2049,7 +2080,13 @@ def main() -> None:
             raw_alert_count += len(raw_alerts)
             combined_alert = combine_stock_alerts(stock, indicators, raw_alerts)
             if combined_alert:
-                research_analysis = build_research_analysis(stock, indicators, config, fundamentals_data)
+                research_analysis = build_research_analysis(
+                    stock,
+                    indicators,
+                    config,
+                    fundamentals_data,
+                    alert_type=combined_alert["type"],
+                )
                 combined_alert["research_analysis"] = research_analysis
                 combined_alert["action_level"] = (
                     f"{research_analysis['priority']}：研究优先级。"
