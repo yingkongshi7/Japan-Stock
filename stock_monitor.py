@@ -2,6 +2,7 @@ import argparse
 import csv
 import json
 import logging
+import math
 import os
 import smtplib
 import sys
@@ -643,6 +644,48 @@ def is_trend_intact(indicators: Dict[str, Any], thresholds: Dict[str, Any]) -> b
     )
 
 
+def fmt_pct(value: Optional[float]) -> str:
+    return "N/A" if value is None else f"{value:.2f}%"
+
+
+def fmt_num(value: Optional[float]) -> str:
+    return "N/A" if value is None else f"{value:,.2f}"
+
+
+def alert_action_prefix(alert_type: str) -> str:
+    """Return a short action prefix for email subjects."""
+    mapping = {
+        "pullback_watch": "观察池",
+        "deep_pullback_trend_intact": "重点研究",
+        "breakout_strength": "强势观察",
+        "overheat_risk": "不宜追高",
+        "trend_weakness": "风险警告",
+        "sector_heat": "行业热度",
+        "weak_deep_pullback": "高风险复查",
+        "pullback_but_overheated": "观察名单",
+        "breakout_but_overheated": "强势观察",
+    }
+    return mapping.get(alert_type, "观察提醒")
+
+def trade_action_level(alert_type: str) -> str:
+    """Return the research priority shown in the email body.
+
+    A/B/C are research priority labels, not buy ratings.
+    """
+    mapping = {
+        "deep_pullback_trend_intact": "A：重点研究。技术形态和主题逻辑较强，但仍需人工确认估值、财报和仓位。",
+        "pullback_watch": "B：加入观察池。部分条件满足，但仍需等待基本面和估值确认。",
+        "breakout_strength": "B：强势观察。趋势较强，但不代表可以追高。",
+        "overheat_risk": "C：暂不关注。短期过热或仓位风险较高。",
+        "trend_weakness": "C：暂不关注。趋势或相对强度风险较高。",
+        "sector_heat": "B：行业热度观察。用于发现资金方向，不代表个股买入评级。",
+        "weak_deep_pullback": "C：暂不关注。深度回撤叠加趋势转弱，需要高风险复查。",
+        "pullback_but_overheated": "B：加入观察池。中期值得研究，但短线不宜追高。",
+        "breakout_but_overheated": "B：强势观察。趋势较强，但短线过热。",
+    }
+    return mapping.get(alert_type, "C：暂不关注。仅作为观察提醒。")
+
+
 def check_alert_conditions(
     stock: StockInfo,
     indicators: Dict[str, Any],
@@ -714,48 +757,108 @@ def check_alert_conditions(
     return alerts
 
 
-def fmt_pct(value: Optional[float]) -> str:
-    return "N/A" if value is None else f"{value:.2f}%"
+
+THEME_CONNECTIONS_BY_TICKER: Dict[str, List[str]] = {
+    "8035.T": ["半导体设备", "AI硬件"],
+    "6857.T": ["半导体测试设备", "AI硬件"],
+    "6920.T": ["半导体设备"],
+    "6146.T": ["半导体设备", "精密加工"],
+    "7735.T": ["半导体设备"],
+    "4063.T": ["半导体材料"],
+    "3436.T": ["半导体材料"],
+    "6315.T": ["半导体封装设备"],
+    "6590.T": ["半导体设备"],
+    "6526.T": ["半导体设计", "AI硬件"],
+    "6723.T": ["车载 / 功率 / 工业"],
+    "6963.T": ["车载 / 功率 / 工业"],
+    "5805.T": ["光通信", "电力设备", "AI数据中心"],
+    "5801.T": ["光通信", "电力设备", "AI数据中心"],
+    "5802.T": ["光通信", "电力设备", "AI数据中心"],
+    "5803.T": ["光通信", "AI数据中心"],
+    "6367.T": ["冷却系统", "AI数据中心"],
+    "6501.T": ["电力设备", "服务器供应链", "AI数据中心"],
+    "6503.T": ["电力设备", "工业自动化"],
+    "1942.T": ["电力施工", "AI数据中心"],
+    "1969.T": ["冷却系统", "数据中心工程"],
+    "1951.T": ["通信基础设施", "数据中心工程"],
+    "6861.T": ["工业自动化", "精密制造"],
+    "6954.T": ["工业自动化", "机器人"],
+    "6506.T": ["工业自动化", "机器人"],
+    "6645.T": ["工业自动化"],
+    "6273.T": ["工业自动化"],
+    "6383.T": ["物流自动化"],
+    "6324.T": ["机器人零部件"],
+    "6481.T": ["工业自动化", "机器人零部件"],
+    "6479.T": ["精密部件", "车载 / 工业"],
+    "7011.T": ["防卫", "能源设备"],
+    "7012.T": ["防卫", "航空航天"],
+    "7013.T": ["防卫", "航空航天", "能源设备"],
+    "6701.T": ["防卫", "服务器供应链", "AI基础设施"],
+    "6702.T": ["服务器供应链", "IT基础设施"],
+}
 
 
-def fmt_num(value: Optional[float]) -> str:
-    return "N/A" if value is None else f"{value:,.2f}"
+
+def config_section(config: Optional[Dict[str, Any]], key: str, defaults: Dict[str, Any]) -> Dict[str, Any]:
+    configured = (config or {}).get(key, {}) or {}
+    merged = dict(defaults)
+    merged.update(configured)
+    return merged
 
 
-def alert_action_prefix(alert_type: str) -> str:
-    """Return a short action prefix for email subjects."""
-    mapping = {
-        "pullback_watch": "观察池",
-        "deep_pullback_trend_intact": "重点研究",
-        "breakout_strength": "强势观察",
-        "overheat_risk": "不宜追高",
-        "trend_weakness": "风险警告",
-        "sector_heat": "行业热度",
-        "weak_deep_pullback": "高风险复查",
-        "pullback_but_overheated": "观察名单",
-        "breakout_but_overheated": "强势观察",
-    }
-    return mapping.get(alert_type, "观察提醒")
+def bool_ja(value: Any) -> str:
+    return "是" if bool(value) else "否"
 
 
-def trade_action_level(alert_type: str) -> str:
-    """Return the research priority shown in the email body.
+def money_jpy(value: Optional[float]) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:,.0f}円"
 
-    A/B/C are research priority labels, not buy ratings.
-    """
-    mapping = {
-        "deep_pullback_trend_intact": "A：重点研究。技术形态和主题逻辑较强，但仍需人工确认估值、财报和仓位。",
-        "pullback_watch": "B：加入观察池。部分条件满足，但仍需等待基本面和估值确认。",
-        "breakout_strength": "B：强势观察。趋势较强，但不代表可以追高。",
-        "overheat_risk": "C：暂不关注。短期过热或仓位风险较高。",
-        "trend_weakness": "C：暂不关注。趋势或相对强度风险较高。",
-        "sector_heat": "B：行业热度观察。用于发现资金方向，不代表个股买入评级。",
-        "weak_deep_pullback": "C：暂不关注。深度回撤叠加趋势转弱，需要高风险复查。",
-        "pullback_but_overheated": "B：加入观察池。中期值得研究，但短线不宜追高。",
-        "breakout_but_overheated": "B：强势观察。趋势较强，但短线过热。",
-    }
-    return mapping.get(alert_type, "C：暂不关注。仅作为观察提醒。")
 
+def pct_value(value: Any) -> Optional[float]:
+    return float(value) if value is not None else None
+
+
+
+
+def to_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(parsed) or math.isinf(parsed):
+        return None
+    return parsed
+
+
+def safe_div(numerator: Any, denominator: Any) -> Optional[float]:
+    n = to_float(numerator)
+    d = to_float(denominator)
+    if n is None or d is None or d == 0:
+        return None
+    return n / d
+
+
+def maybe_num(value: Any) -> str:
+    parsed = to_float(value)
+    if parsed is None:
+        return "数据不足"
+    return f"{parsed:,.2f}"
+
+
+def maybe_pct(value: Any) -> str:
+    parsed = to_float(value)
+    if parsed is None:
+        return "数据不足"
+    return f"{parsed * 100:.2f}%"
 
 def build_trade_recommendation(alert_type: str, indicators: Dict[str, Any]) -> str:
     """Build a plain-language recommendation for a stock-level alert."""
@@ -842,7 +945,6 @@ def build_trade_recommendation(alert_type: str, indicators: Dict[str, Any]) -> s
 - 再决定是否加入买入候选。
 """
 
-
 def build_sector_recommendation(alert: Dict[str, Any]) -> str:
     """Build a recommendation block for a sector heat alert."""
     return """交易建议：行业热度上升，但不代表可以无差别追买。
@@ -855,66 +957,213 @@ def build_sector_recommendation(alert: Dict[str, Any]) -> str:
 - 行业热度提醒主要用于发现资金流入方向，而不是立即买入指令。
 """
 
-
-THEME_CONNECTIONS_BY_TICKER: Dict[str, List[str]] = {
-    "8035.T": ["半导体设备", "AI硬件"],
-    "6857.T": ["半导体测试设备", "AI硬件"],
-    "6920.T": ["半导体设备"],
-    "6146.T": ["半导体设备", "精密加工"],
-    "7735.T": ["半导体设备"],
-    "4063.T": ["半导体材料"],
-    "3436.T": ["半导体材料"],
-    "6315.T": ["半导体封装设备"],
-    "6590.T": ["半导体设备"],
-    "6526.T": ["半导体设计", "AI硬件"],
-    "6723.T": ["车载 / 功率 / 工业"],
-    "6963.T": ["车载 / 功率 / 工业"],
-    "5805.T": ["光通信", "电力设备", "AI数据中心"],
-    "5801.T": ["光通信", "电力设备", "AI数据中心"],
-    "5802.T": ["光通信", "电力设备", "AI数据中心"],
-    "5803.T": ["光通信", "AI数据中心"],
-    "6367.T": ["冷却系统", "AI数据中心"],
-    "6501.T": ["电力设备", "服务器供应链", "AI数据中心"],
-    "6503.T": ["电力设备", "工业自动化"],
-    "1942.T": ["电力施工", "AI数据中心"],
-    "1969.T": ["冷却系统", "数据中心工程"],
-    "1951.T": ["通信基础设施", "数据中心工程"],
-    "6861.T": ["工业自动化", "精密制造"],
-    "6954.T": ["工业自动化", "机器人"],
-    "6506.T": ["工业自动化", "机器人"],
-    "6645.T": ["工业自动化"],
-    "6273.T": ["工业自动化"],
-    "6383.T": ["物流自动化"],
-    "6324.T": ["机器人零部件"],
-    "6481.T": ["工业自动化", "机器人零部件"],
-    "6479.T": ["精密部件", "车载 / 工业"],
-    "7011.T": ["防卫", "能源设备"],
-    "7012.T": ["防卫", "航空航天"],
-    "7013.T": ["防卫", "航空航天", "能源设备"],
-    "6701.T": ["防卫", "服务器供应链", "AI基础设施"],
-    "6702.T": ["服务器供应链", "IT基础设施"],
-}
+def _df_metric(df: Any, row_names: List[str], col_idx: int = 0) -> Optional[float]:
+    if df is None or getattr(df, "empty", True):
+        return None
+    if len(getattr(df, "columns", [])) <= col_idx:
+        return None
+    for row in row_names:
+        try:
+            if row in df.index:
+                value = df.loc[row].iloc[col_idx]
+                parsed = to_float(value)
+                if parsed is not None:
+                    return parsed
+        except Exception:
+            continue
+    return None
 
 
-def config_section(config: Optional[Dict[str, Any]], key: str, defaults: Dict[str, Any]) -> Dict[str, Any]:
-    configured = (config or {}).get(key, {}) or {}
+def load_json_file(path: str, default: Any) -> Any:
+    p = Path(path)
+    if not p.exists():
+        return default
+    try:
+        with p.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def save_json_file(path: str, payload: Any) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def fundamentals_settings(config: Dict[str, Any]) -> Dict[str, Any]:
+    defaults = {
+        "enabled": True,
+        "provider": "yfinance",
+        "cache_enabled": True,
+        "cache_path": "fundamentals_cache.json",
+        "cache_ttl_days": 7,
+        "valuation_thresholds": {
+            "high_per": 40,
+            "high_pbr": 5,
+            "high_psr": 8,
+            "high_ev_ebitda": 25,
+        },
+        "growth_thresholds": {
+            "strong_revenue_growth_pct": 10,
+            "strong_operating_profit_growth_pct": 10,
+            "weak_revenue_growth_pct": -5,
+            "weak_operating_profit_growth_pct": -10,
+        },
+    }
+    configured = config.get("fundamentals", {}) or {}
     merged = dict(defaults)
     merged.update(configured)
+    merged["valuation_thresholds"] = {
+        **defaults["valuation_thresholds"],
+        **(configured.get("valuation_thresholds", {}) or {}),
+    }
+    merged["growth_thresholds"] = {
+        **defaults["growth_thresholds"],
+        **(configured.get("growth_thresholds", {}) or {}),
+    }
     return merged
 
 
-def bool_ja(value: Any) -> str:
-    return "是" if bool(value) else "否"
+def fetch_yfinance_fundamentals(ticker: str) -> Dict[str, Any]:
+    result: Dict[str, Any] = {
+        "ticker": ticker,
+        "market_cap": None,
+        "trailing_pe": None,
+        "forward_pe": None,
+        "price_to_book": None,
+        "price_to_sales": None,
+        "enterprise_value": None,
+        "ev_to_ebitda": None,
+        "revenue_ttm": None,
+        "revenue_latest_quarter": None,
+        "revenue_yoy_growth": None,
+        "operating_income_latest_quarter": None,
+        "operating_income_yoy_growth": None,
+        "net_income_latest_quarter": None,
+        "net_income_yoy_growth": None,
+        "operating_margin": None,
+        "total_equity": None,
+        "roe": None,
+        "operating_cash_flow": None,
+        "capital_expenditure": None,
+        "free_cash_flow": None,
+        "cash": None,
+        "total_debt": None,
+        "data_quality": "missing",
+        "missing_fields": [],
+    }
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info or {}
+        q_income = tk.quarterly_income_stmt
+        q_balance = tk.quarterly_balance_sheet
+        q_cashflow = tk.quarterly_cashflow
+        income_stmt = tk.income_stmt
+        balance_sheet = tk.balance_sheet
+        cashflow = tk.cashflow
+
+        result["market_cap"] = to_float(info.get("marketCap"))
+        result["trailing_pe"] = to_float(info.get("trailingPE"))
+        result["forward_pe"] = to_float(info.get("forwardPE"))
+        result["price_to_book"] = to_float(info.get("priceToBook"))
+        result["price_to_sales"] = to_float(info.get("priceToSalesTrailing12Months"))
+        result["enterprise_value"] = to_float(info.get("enterpriseValue"))
+        result["ev_to_ebitda"] = to_float(info.get("enterpriseToEbitda"))
+
+        revenue_ttm = _df_metric(income_stmt, ["Total Revenue"], 0)
+        result["revenue_ttm"] = revenue_ttm
+        result["revenue_latest_quarter"] = _df_metric(q_income, ["Total Revenue"], 0)
+        revenue_prev_year_q = _df_metric(q_income, ["Total Revenue"], 4)
+        result["revenue_yoy_growth"] = safe_div(result["revenue_latest_quarter"], revenue_prev_year_q)
+        if result["revenue_yoy_growth"] is not None:
+            result["revenue_yoy_growth"] -= 1
+
+        result["operating_income_latest_quarter"] = _df_metric(q_income, ["Operating Income", "Operating Revenue"], 0)
+        op_prev_year_q = _df_metric(q_income, ["Operating Income", "Operating Revenue"], 4)
+        result["operating_income_yoy_growth"] = safe_div(result["operating_income_latest_quarter"], op_prev_year_q)
+        if result["operating_income_yoy_growth"] is not None:
+            result["operating_income_yoy_growth"] -= 1
+
+        result["net_income_latest_quarter"] = _df_metric(q_income, ["Net Income", "Net Income Common Stockholders"], 0)
+        net_prev_year_q = _df_metric(q_income, ["Net Income", "Net Income Common Stockholders"], 4)
+        result["net_income_yoy_growth"] = safe_div(result["net_income_latest_quarter"], net_prev_year_q)
+        if result["net_income_yoy_growth"] is not None:
+            result["net_income_yoy_growth"] -= 1
+
+        result["operating_margin"] = safe_div(result["operating_income_latest_quarter"], result["revenue_latest_quarter"])
+        result["total_equity"] = _df_metric(q_balance, ["Stockholders Equity", "Total Equity Gross Minority Interest"], 0)
+        net_income_ttm = _df_metric(income_stmt, ["Net Income", "Net Income Common Stockholders"], 0)
+        result["roe"] = safe_div(net_income_ttm, result["total_equity"])
+
+        result["operating_cash_flow"] = _df_metric(q_cashflow, ["Operating Cash Flow", "Cash Flow From Continuing Operating Activities"], 0)
+        result["capital_expenditure"] = _df_metric(q_cashflow, ["Capital Expenditure"], 0)
+        if result["capital_expenditure"] is not None:
+            result["capital_expenditure"] = abs(result["capital_expenditure"])
+        result["free_cash_flow"] = None
+        if result["operating_cash_flow"] is not None and result["capital_expenditure"] is not None:
+            result["free_cash_flow"] = result["operating_cash_flow"] - result["capital_expenditure"]
+
+        result["cash"] = _df_metric(balance_sheet, ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"], 0)
+        result["total_debt"] = _df_metric(balance_sheet, ["Total Debt"], 0)
+
+        if result["price_to_sales"] is None:
+            result["price_to_sales"] = safe_div(result["market_cap"], result["revenue_ttm"])
+        if result["price_to_book"] is None:
+            result["price_to_book"] = safe_div(result["market_cap"], result["total_equity"])
+    except Exception as exc:
+        logging.warning("Fundamentals fetch failed for %s: %s", ticker, exc)
+
+    required_fields = [
+        "market_cap",
+        "trailing_pe",
+        "price_to_book",
+        "price_to_sales",
+        "enterprise_value",
+        "ev_to_ebitda",
+        "revenue_latest_quarter",
+        "revenue_yoy_growth",
+        "operating_income_yoy_growth",
+        "net_income_yoy_growth",
+        "operating_margin",
+        "roe",
+        "free_cash_flow",
+    ]
+    missing = [f for f in required_fields if result.get(f) is None]
+    result["missing_fields"] = missing
+    if len(missing) == len(required_fields):
+        result["data_quality"] = "missing"
+    elif missing:
+        result["data_quality"] = "partial"
+    else:
+        result["data_quality"] = "ok"
+    if missing:
+        logging.info("Fundamentals missing for %s: %s", ticker, ", ".join(missing))
+    return result
 
 
-def money_jpy(value: Optional[float]) -> str:
-    if value is None:
-        return "N/A"
-    return f"{value:,.0f}円"
-
-
-def pct_value(value: Any) -> Optional[float]:
-    return float(value) if value is not None else None
+def fetch_fundamentals_with_cache(
+    ticker: str,
+    settings: Dict[str, Any],
+    cache_store: Dict[str, Any],
+    refresh: bool = False,
+) -> Dict[str, Any]:
+    now = datetime.now(JST)
+    ttl_days = int(settings.get("cache_ttl_days", 7))
+    entry = cache_store.get(ticker, {})
+    if not refresh and entry:
+        ts = entry.get("fetched_at")
+        if ts:
+            try:
+                fetched = datetime.fromisoformat(ts)
+                if (now - fetched).days < ttl_days and isinstance(entry.get("data"), dict):
+                    return entry["data"]
+            except Exception:
+                pass
+    data = fetch_yfinance_fundamentals(ticker)
+    cache_store[ticker] = {"fetched_at": now.isoformat(), "data": data}
+    return data
 
 
 def classify_technical_status(indicators: Dict[str, Any], config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -986,38 +1235,134 @@ def analyze_theme_relevance(stock: StockInfo) -> Dict[str, Any]:
     return {"relevance": relevance, "logic": logic, "need_confirm": need_confirm}
 
 
-def analyze_valuation_risk(indicators: Dict[str, Any]) -> Dict[str, Any]:
+def analyze_valuation_risk(
+    indicators: Dict[str, Any],
+    fundamentals: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    thresholds = fundamentals_settings(config or {}).get("valuation_thresholds", {})
+    high_per = float(thresholds.get("high_per", 40))
+    high_pbr = float(thresholds.get("high_pbr", 5))
+    high_psr = float(thresholds.get("high_psr", 8))
+    high_ev_ebitda = float(thresholds.get("high_ev_ebitda", 25))
+
     drawdown = pct_value(indicators.get("drawdown_pct")) or 0.0
     return_6m = pct_value(indicators.get("return_6m_pct"))
-    warnings = ["估值数据不足，需要人工确认。不可仅凭回撤幅度判断便宜。"]
+    per = fundamentals.get("trailing_pe") or fundamentals.get("forward_pe")
+    pbr = fundamentals.get("price_to_book")
+    psr = fundamentals.get("price_to_sales")
+    ev_to_ebitda = fundamentals.get("ev_to_ebitda")
+    roe = fundamentals.get("roe")
+    operating_margin = fundamentals.get("operating_margin")
+    quality = fundamentals.get("data_quality", "missing")
+
+    warnings: List[str] = []
+    if quality == "missing":
+        warnings.append("估值数据不足，需要人工确认。不可仅凭回撤幅度判断便宜。")
+    elif quality == "partial":
+        warnings.append("估值数据部分缺失，结论仅供研究参考。")
+
     if drawdown >= 20 and return_6m is not None and return_6m >= 40:
         warnings.append("该股可能只是从过热区回落，未必已经低估。")
+
+    high_flags = []
+    if per is not None and per >= high_per:
+        high_flags.append(f"PER>{high_per}")
+    if pbr is not None and pbr >= high_pbr:
+        high_flags.append(f"PBR>{high_pbr}")
+    if psr is not None and psr >= high_psr:
+        high_flags.append(f"PSR>{high_psr}")
+    if ev_to_ebitda is not None and ev_to_ebitda >= high_ev_ebitda:
+        high_flags.append(f"EV/EBITDA>{high_ev_ebitda}")
+    if high_flags:
+        warnings.append(f"估值仍偏高（{', '.join(high_flags)}），需警惕主题降温后的估值压缩。")
+
+    judgement = "待确认"
+    if high_flags:
+        judgement = "偏高"
+    elif quality == "ok":
+        judgement = "中性"
+
     return {
-        "per": "数据不足",
-        "pbr": "数据不足",
-        "psr": "数据不足",
-        "ev_ebitda": "数据不足",
-        "roe": "数据不足",
-        "operating_margin": "数据不足",
+        "per": maybe_num(per),
+        "pbr": maybe_num(pbr),
+        "psr": maybe_num(psr),
+        "ev_ebitda": maybe_num(ev_to_ebitda),
+        "roe": maybe_pct(roe),
+        "operating_margin": maybe_pct(operating_margin),
         "historical_percentile_5y": "数据不足",
-        "judgement": "待确认",
-        "risk": " ".join(warnings),
+        "judgement": judgement,
+        "risk": " ".join(warnings) if warnings else "估值暂无明显异常，但仍需结合财报与业务结构人工确认。",
+        "data_quality": quality,
     }
 
 
-def analyze_fundamentals(stock: StockInfo) -> Dict[str, Any]:
+def analyze_fundamentals(
+    stock: StockInfo,
+    fundamentals: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    growth = fundamentals_settings(config or {}).get("growth_thresholds", {})
+    strong_rev = float(growth.get("strong_revenue_growth_pct", 10))
+    strong_op = float(growth.get("strong_operating_profit_growth_pct", 10))
+    weak_rev = float(growth.get("weak_revenue_growth_pct", -5))
+    weak_op = float(growth.get("weak_operating_profit_growth_pct", -10))
+
+    rev_growth = fundamentals.get("revenue_yoy_growth")
+    op_growth = fundamentals.get("operating_income_yoy_growth")
+    net_growth = fundamentals.get("net_income_yoy_growth")
+    op_margin = fundamentals.get("operating_margin")
+    roe = fundamentals.get("roe")
+    fcf = fundamentals.get("free_cash_flow")
+    quality = fundamentals.get("data_quality", "missing")
+
+    status = "待确认"
+    if quality != "missing":
+        if (
+            rev_growth is not None and rev_growth * 100 > strong_rev
+            and op_growth is not None and op_growth * 100 > strong_op
+            and op_margin is not None and op_margin > 0.08
+            and fcf is not None and fcf > 0
+        ):
+            status = "强"
+        elif (
+            (rev_growth is not None and rev_growth * 100 < weak_rev)
+            or (op_growth is not None and op_growth * 100 < weak_op)
+            or (fcf is not None and fcf < 0)
+        ):
+            status = "弱"
+        else:
+            status = "中"
+
+    if status in {"强", "中"}:
+        support_theme = "部分支持，但仍需查看公司说明是否来自AI/数据中心/半导体等主题。"
+    elif status == "待确认":
+        support_theme = "待确认"
+    else:
+        support_theme = "暂不支持，需警惕基本面与主题叙事背离。"
+
+    note = "基本面数据不足，需要人工查看最新決算短信 / 有価証券報告書 / 決算説明資料。"
+    if quality == "ok":
+        note = "已获取部分可用财务数据，仍需人工核对分部收入、订单和指引口径。"
+    elif quality == "partial":
+        note = "基本面数据部分可用，但关键字段仍缺失，需要人工补充确认。"
+
     return {
-        "revenue_growth": "数据不足",
-        "operating_profit_growth": "数据不足",
-        "net_profit_growth": "数据不足",
+        "revenue_growth": maybe_pct(rev_growth),
+        "operating_profit_growth": maybe_pct(op_growth),
+        "net_profit_growth": maybe_pct(net_growth),
         "guidance_revision": "数据不足",
         "operating_margin_change": "数据不足",
         "free_cash_flow_change": "数据不足",
         "theme_demand_comment": "数据不足",
-        "status": "待确认",
-        "support_theme": "待确认",
-        "materials": "最新决算短信 / 有価証券報告書 / 決算説明資料 / 订单和需求说明",
-        "note": "基本面数据不足，需要人工查看最新决算短信 / 有価証券報告書 / 決算説明資料。",
+        "status": status,
+        "support_theme": support_theme,
+        "materials": "最新決算短信 / 有価証券報告書 / 決算説明資料 / 订单和需求说明",
+        "note": note,
+        "operating_margin": maybe_pct(op_margin),
+        "roe": maybe_pct(roe),
+        "free_cash_flow": maybe_num(fcf),
+        "data_quality": quality,
     }
 
 
@@ -1080,7 +1425,12 @@ def analyze_position_feasibility(indicators: Dict[str, Any], config: Optional[Di
     }
 
 
-def build_research_analysis(stock: StockInfo, indicators: Dict[str, Any], config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def build_research_analysis(
+    stock: StockInfo,
+    indicators: Dict[str, Any],
+    config: Optional[Dict[str, Any]],
+    fundamentals: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     screening = config_section(
         config,
         "screening",
@@ -1093,8 +1443,9 @@ def build_research_analysis(stock: StockInfo, indicators: Dict[str, Any], config
     )
     technical = classify_technical_status(indicators, config)
     theme = analyze_theme_relevance(stock)
-    valuation = analyze_valuation_risk(indicators)
-    fundamentals = analyze_fundamentals(stock)
+    fundamentals_data = fundamentals or {"data_quality": "missing", "missing_fields": []}
+    valuation = analyze_valuation_risk(indicators, fundamentals_data, config)
+    fundamentals_view = analyze_fundamentals(stock, fundamentals_data, config)
     position = analyze_position_feasibility(indicators, config)
 
     relative_3m = pct_value(indicators.get("relative_topix_3m_pct"))
@@ -1128,13 +1479,24 @@ def build_research_analysis(stock: StockInfo, indicators: Dict[str, Any], config
         final_action = "暂不关注"
         final_note = "主题、趋势或相对强度条件不足，先等待更清晰的信号。"
 
+    if fundamentals_view.get("status") == "弱":
+        if priority == "A":
+            priority = "B"
+        elif priority == "B":
+            priority = "C"
+        final_note = "基本面状态偏弱，研究优先级已下调。即使技术条件满足，也不应视为买入信号。"
+
+    if fundamentals_data.get("data_quality") != "ok":
+        final_note += " 估值和基本面仍需人工确认，A级不是买入评级。"
+
     return {
         "priority": priority,
         "priority_note": f"{priority}级代表研究优先级，不代表买入评级。",
         "technical": technical,
         "theme": theme,
         "valuation": valuation,
-        "fundamentals": fundamentals,
+        "fundamentals": fundamentals_view,
+        "fundamentals_data": fundamentals_data,
         "position": position,
         "final_action": final_action,
         "final_note": final_note,
@@ -1168,8 +1530,8 @@ def simple_combined_alert(raw_alert: Dict[str, str], raw_alerts: List[Dict[str, 
             alert_type,
             raw_alert["title"],
             raw_alerts,
-            "个股已经跌破关键趋势线，位置便宜本身不足以构成买入理由。",
-            "相对 TOPIX 明显走弱，短期需要把风险控制放在第一位。",
+            "个股已跌破关键趋势线，位置便宜本身不足以构成买入理由。",
+            "相对 TOPIX 明显走弱，短期需要优先控制风险。",
             "不建议新买入；已有仓位需要复查基本面、财报、订单和行业逻辑。",
         )
     if alert_type == "overheat_risk":
@@ -1177,8 +1539,8 @@ def simple_combined_alert(raw_alert: Dict[str, str], raw_alerts: List[Dict[str, 
             alert_type,
             raw_alert["title"],
             raw_alerts,
-            "中期趋势可能仍强，但当前价格已经明显透支部分预期。",
-            "短期涨幅、均线偏离或成交量拥挤，继续追高的风险较高。",
+            "中期趋势可能仍强，但当前价格可能透支了部分预期。",
+            "短期涨幅、均线偏离或成交量拥挤，继续追高风险较高。",
             "不建议新买入；已有仓位可考虑部分止盈，至少停止继续加仓。",
         )
     if alert_type == "deep_pullback_trend_intact":
@@ -1186,7 +1548,7 @@ def simple_combined_alert(raw_alert: Dict[str, str], raw_alerts: List[Dict[str, 
             alert_type,
             raw_alert["title"],
             raw_alerts,
-            "股价深度回撤，但当前仍站在长期趋势线之上，值得重点研究。",
+            "股价深度回撤，但当前仍在长期趋势线之上，值得重点研究。",
             "需要确认回撤是估值消化还是基本面恶化，不能只看跌幅。",
             "优先检查财报、业绩修正和行业新闻；基本面未恶化时再考虑分批观察。",
         )
@@ -1195,18 +1557,18 @@ def simple_combined_alert(raw_alert: Dict[str, str], raw_alerts: List[Dict[str, 
             alert_type,
             raw_alert["title"],
             raw_alerts,
-            "股价从 52 周高点回撤到观察区间，且相对强弱没有明显恶化。",
-            "短期仍需等待价格和成交量确认，不宜一次性重仓。",
-            "可以加入重点观察名单；若基本面稳定，可考虑小额分批研究。",
+            "股价从52周高点回撤到观察区间，且相对强弱未明显恶化。",
+            "短期仍需等待价格与成交量确认，不宜一次性重仓。",
+            "可加入重点观察名单；若基本面稳定，可考虑小额分批研究。",
         )
     if alert_type == "breakout_strength":
         return make_combined_alert(
             alert_type,
             raw_alert["title"],
             raw_alerts,
-            "股价创出 52 周新高，且相对 TOPIX 表现较强，说明资金可能正在流入。",
-            "突破后短期可能回踩或波动加大，不适合看到邮件后重仓追入。",
-            "已有仓位可继续观察；没有仓位时，等待回踩 20 日线/50 日线或小仓试探。",
+            "股价创52周新高，且相对TOPIX较强，显示资金可能流入。",
+            "突破后短期可能回踩或波动加大，不适合重仓追入。",
+            "已有仓位可继续观察；无仓位时等待回踩20日线/50日线或小仓位试探。",
         )
     return make_combined_alert(
         alert_type,
@@ -1233,8 +1595,8 @@ def combine_stock_alerts(
             "weak_deep_pullback",
             "深度回撤但趋势转弱，谨慎复查",
             raw_alerts,
-            "股价从 52 周高点深度回撤，位置可能值得跟踪。",
-            "当前跌破关键均线，且相对 TOPIX 明显走弱，不能简单理解为便宜。",
+            "股价从52周高点深度回撤，位置可能值得跟踪。",
+            "当前跌破关键均线且相对TOPIX走弱，不能简单理解为便宜。",
             "不建议新买入；已有仓位应复查基本面、财报、订单和行业逻辑。",
         )
     if "pullback_watch" in raw_types and "overheat_risk" in raw_types:
@@ -1242,9 +1604,9 @@ def combine_stock_alerts(
             "pullback_but_overheated",
             "回撤后修复，但短线过热",
             raw_alerts,
-            "股价仍明显低于 52 周高点，并重新站上或接近 200 日线，可以加入观察名单。",
-            "近期涨幅较大且成交量放大，说明短线可能拥挤，不适合追高。",
-            "等待回踩 20 日线 / 50 日线、成交量降温，或下一次财报确认基本面后再评估。",
+            "股价仍明显低于52周高点，且重新站上或接近200日线，可加入观察名单。",
+            "近期涨幅较大且成交量放大，短线可能拥挤，不适合追高。",
+            "等待回踩20日线/50日线、成交量降温，或财报确认后再评估。",
         )
     if "breakout_strength" in raw_types and "overheat_risk" in raw_types:
         return make_combined_alert(
@@ -1252,8 +1614,8 @@ def combine_stock_alerts(
             "强势突破但短线过热",
             raw_alerts,
             "股价创新高并有资金流入迹象。",
-            "短期涨幅和成交量可能过热，新仓追高的风险较高。",
-            "已有仓位可以继续观察；不建议新仓重仓追高。",
+            "短期涨幅与成交量可能过热。",
+            "已有仓位可继续观察，不建议新仓重仓追高。",
         )
 
     priority = [
@@ -1275,173 +1637,92 @@ def build_raw_alert_lines(raw_alerts: List[Dict[str, str]]) -> str:
     return "\n".join(f"- {alert['type']}：{alert['title']}" for alert in raw_alerts) or "- 无"
 
 
-def build_email_body(stock: StockInfo, indicators: Dict[str, Any], combined_alert: Dict[str, Any]) -> str:
-    above_ma200 = "是" if indicators.get("above_ma200") else "否"
-    recent_cross = "是" if indicators.get("recent_cross_above_ma200") else "否"
-    volume_spike = "是" if indicators.get("volume_spike") else "否"
-
-    return f"""提醒类型：{combined_alert["title"]}
-操作等级：{combined_alert["action_level"]}
-
-股票代码：{stock.ticker}
-股票名称：{stock.name}
-产业分类：{stock.sector}
-数据日期：{indicators.get("last_date", "N/A")}
-
-核心指标：
-当前价格：{fmt_num(indicators.get("current_price"))}
-52周最高收盘价：{fmt_num(indicators.get("high_52w"))}
-从52周高点回撤：{fmt_pct(indicators.get("drawdown_pct"))}
-
-20日均线：{fmt_num(indicators.get("ma20"))}
-50日均线：{fmt_num(indicators.get("ma50"))}
-200日均线：{fmt_num(indicators.get("ma200"))}
-当前价格偏离200日均线：{fmt_pct(indicators.get("above_ma200_pct"))}
-当前价格高于200日均线：{above_ma200}
-最近5个交易日重新站上200日均线：{recent_cross}
-
-过去1个月涨幅：{fmt_pct(indicators.get("return_1m_pct"))}
-过去3个月涨幅：{fmt_pct(indicators.get("return_3m_pct"))}
-过去6个月涨幅：{fmt_pct(indicators.get("return_6m_pct"))}
-过去60日涨幅：{fmt_pct(indicators.get("return_60d_pct"))}
-过去3个月TOPIX涨幅：{fmt_pct(indicators.get("topix_return_3m_pct"))}
-过去3个月相对TOPIX超额收益：{fmt_pct(indicators.get("relative_topix_3m_pct"))}
-过去20日相对TOPIX超额收益：{fmt_pct(indicators.get("relative_topix_20d_pct"))}
-
-当前成交量：{fmt_num(indicators.get("current_volume"))}
-过去20日平均成交量：{fmt_num(indicators.get("avg_volume_20d"))}
-成交量超过20日均量1.5倍：{volume_spike}
-最近3日放量天数：{indicators.get("recent_volume_spike_days", 0)}
-过去20日平均成交额（日元）：{fmt_num(indicators.get("avg_turnover_20d"))}
-
-原始触发信号：
-{build_raw_alert_lines(combined_alert.get("raw_alerts", []))}
-
-综合判断：
-中期判断：
-{combined_alert["medium_term_view"]}
-
-短期判断：
-{combined_alert["short_term_view"]}
-
-建议动作：
-{combined_alert["recommendation"]}
-
-提醒：这不是自动交易，也不是确定买卖指令，只是观察名单提醒，需要人工确认。
-"""
-
-
-def build_raw_alert_lines(raw_alerts: List[Dict[str, str]]) -> str:
-    return "\n".join(f"- {alert['type']}：{alert['title']}" for alert in raw_alerts) or "- 无"
-
-
 def build_email_body(
     stock: StockInfo,
     indicators: Dict[str, Any],
     combined_alert: Dict[str, Any],
     config: Optional[Dict[str, Any]] = None,
+    fundamentals: Optional[Dict[str, Any]] = None,
 ) -> str:
-    analysis = combined_alert.get("research_analysis") or build_research_analysis(stock, indicators, config)
+    analysis = combined_alert.get("research_analysis") or build_research_analysis(stock, indicators, config, fundamentals)
     technical = analysis["technical"]
     theme = analysis["theme"]
     valuation = analysis["valuation"]
-    fundamentals = analysis["fundamentals"]
+    fundamentals_view = analysis["fundamentals"]
     position = analysis["position"]
 
     return f"""【研究提醒】
 股票代码：{stock.ticker}
 股票名称：{stock.name}
 行业主题：{stock.sector}
-数据日期：{indicators.get("last_date", "N/A")}
+数据日期：{indicators.get('last_date', 'N/A')}
 
 一、研究优先级：
-
-* {analysis["priority"]}
-* 说明：{analysis["priority_note"]} A级代表研究优先级高，不代表买入评级。
+* {analysis['priority']}
+* 说明：{analysis['priority_note']} A级代表研究优先级高，不代表买入评级。
 * 原始触发信号：
-{build_raw_alert_lines(combined_alert.get("raw_alerts", []))}
+{build_raw_alert_lines(combined_alert.get('raw_alerts', []))}
 
 二、技术状态：
-
-* 当前价格：{fmt_num(indicators.get("current_price"))}
-* 52周高点：{fmt_num(indicators.get("high_52w"))}
-* 从52周高点回撤：{fmt_pct(indicators.get("drawdown_pct"))}
-* 是否达到深度回撤标准：{bool_ja(technical["deep_pullback"])}
-* 说明：回撤不等于低估，只代表价格从高点明显降温。
-* 20日均线：{fmt_num(indicators.get("ma20"))}
-* 50日均线：{fmt_num(indicators.get("ma50"))}
-* 200日均线：{fmt_num(indicators.get("ma200"))}
-* 当前价格是否高于20日均线：{bool_ja(indicators.get("above_ma20"))}
-* 当前价格是否高于50日均线：{bool_ja(indicators.get("above_ma50"))}
-* 当前价格是否高于200日均线：{bool_ja(indicators.get("above_ma200"))}
-* 当前价格距离200日均线：{fmt_pct(indicators.get("above_ma200_pct"))}
-* 最近5个交易日是否重新站上200日均线：{bool_ja(indicators.get("recent_cross_above_ma200"))}
-* 过去1个月涨幅：{fmt_pct(indicators.get("return_1m_pct"))}
-* 过去3个月涨幅：{fmt_pct(indicators.get("return_3m_pct"))}
-* 过去6个月涨幅：{fmt_pct(indicators.get("return_6m_pct"))}
-* 过去60日涨幅：{fmt_pct(indicators.get("return_60d_pct"))}
-* 过去3个月TOPIX涨幅：{fmt_pct(indicators.get("topix_return_3m_pct"))}
-* 过去3个月相对TOPIX：{fmt_pct(indicators.get("relative_topix_3m_pct"))}
-* 过去20日相对TOPIX：{fmt_pct(indicators.get("relative_topix_20d_pct"))}
-* 技术分类：{technical["classification"]}
-* 技术解读：{technical["interpretation"]}
+* 当前价格：{fmt_num(indicators.get('current_price'))}
+* 52周高点：{fmt_num(indicators.get('high_52w'))}
+* 从52周高点回撤：{fmt_pct(indicators.get('drawdown_pct'))}
+* 是否达到深度回撤标准：{bool_ja(technical['deep_pullback'])}
+* 当前价格是否高于20日均线：{bool_ja(indicators.get('above_ma20'))}
+* 当前价格是否高于50日均线：{bool_ja(indicators.get('above_ma50'))}
+* 当前价格是否高于200日均线：{bool_ja(indicators.get('above_ma200'))}
+* 当前价格距离200日均线：{fmt_pct(indicators.get('above_ma200_pct'))}
+* 最近5个交易日是否重新站上200日均线：{bool_ja(indicators.get('recent_cross_above_ma200'))}
+* 技术分类：{technical['classification']}
+* 技术解读：{technical['interpretation']}
 
 三、主题相关性：
-
-* 主题相关性：{theme["relevance"]}
-* 相关逻辑：{theme["logic"]}
-* 是否需要人工确认业务收入占比：{theme["need_confirm"]}
+* 主题相关性：{theme['relevance']}
+* 相关逻辑：{theme['logic']}
+* 是否需要人工确认业务收入占比：{theme['need_confirm']}
 
 四、估值风险：
-
-* PER：{valuation["per"]}
-* PBR：{valuation["pbr"]}
-* PSR：{valuation["psr"]}
-* EV/EBITDA：{valuation["ev_ebitda"]}
-* ROE：{valuation["roe"]}
-* 营业利润率：{valuation["operating_margin"]}
-* 过去5年估值分位：{valuation["historical_percentile_5y"]}
-* 估值判断：{valuation["judgement"]}
-* 风险提示：{valuation["risk"]}
+* PER：{valuation['per']}
+* PBR：{valuation['pbr']}
+* PSR：{valuation['psr']}
+* EV/EBITDA：{valuation['ev_ebitda']}
+* ROE：{valuation['roe']}
+* 营业利润率：{valuation['operating_margin']}
+* 数据质量：{valuation.get('data_quality', 'missing')}
+* 估值判断：{valuation['judgement']}
+* 风险提示：{valuation['risk']}
 
 五、基本面确认：
-
-* 最近季度营收增长：{fundamentals["revenue_growth"]}
-* 最近季度营业利润增长：{fundamentals["operating_profit_growth"]}
-* 最近季度净利润增长：{fundamentals["net_profit_growth"]}
-* 最近是否上修/下修业绩：{fundamentals["guidance_revision"]}
-* 营业利润率变化：{fundamentals["operating_margin_change"]}
-* 自由现金流变化：{fundamentals["free_cash_flow_change"]}
-* 主题需求说明：{fundamentals["theme_demand_comment"]}
-* 基本面状态：{fundamentals["status"]}
-* 业绩是否支持股价主题：{fundamentals["support_theme"]}
-* 需要人工查看的资料：{fundamentals["materials"]}
-* 说明：{fundamentals["note"]}
+* 最近季度营收增长：{fundamentals_view['revenue_growth']}
+* 最近季度营业利润增长：{fundamentals_view['operating_profit_growth']}
+* 最近季度净利润增长：{fundamentals_view['net_profit_growth']}
+* 营业利润率：{fundamentals_view.get('operating_margin', '数据不足')}
+* ROE：{fundamentals_view.get('roe', '数据不足')}
+* 自由现金流：{fundamentals_view.get('free_cash_flow', '数据不足')}
+* 基本面状态：{fundamentals_view['status']}
+* 业绩是否支持主题：{fundamentals_view['support_theme']}
+* 需要人工查看的资料：{fundamentals_view['materials']}
+* 说明：{fundamentals_view['note']}
 
 六、仓位可执行性：
-
-* 当前价格：{fmt_num(position["price"])}
-* 交易单位：{position["lot_size"]}股
-* 一手金额：{money_jpy(position["lot_amount"])}
-* 用户投资资金：{money_jpy(position["capital"])}
-* 一手金额占比：{fmt_pct(position["lot_pct"])}
-* 是否超过单股初始仓位上限：{bool_ja(position["exceeds_initial_limit"])}
-* 是否超过单股最大仓位上限：{bool_ja(position["exceeds_max_limit"])}
-* 是否允许単元未満株 / S株：{bool_ja(position["allow_odd_lot"])}
-* 仓位建议：{position["advice"]}
+* 当前价格：{fmt_num(position['price'])}
+* 交易单位：{position['lot_size']}股
+* 一手金额：{money_jpy(position['lot_amount'])}
+* 用户投资资金：{money_jpy(position['capital'])}
+* 一手金额占比：{fmt_pct(position['lot_pct'])}
+* 是否超过单股初始仓位上限：{bool_ja(position['exceeds_initial_limit'])}
+* 是否超过单股最大仓位上限：{bool_ja(position['exceeds_max_limit'])}
+* 是否允许単元未満株 / S株：{bool_ja(position['allow_odd_lot'])}
+* 仓位建议：{position['advice']}
 
 七、最终操作建议：
-
-* {analysis["final_action"]}
-* 说明：{analysis["final_note"]}
+* {analysis['final_action']}
+* 说明：{analysis['final_note']}
 
 八、提醒：
-
 * 本脚本只做观察，不自动交易。
 * 回撤不等于低估。
 * A级不等于买入评级。
-* 个股不进入主回撤加仓表。
-* 主策略仍应以指数定投和规则化回撤加仓为核心。
 * 这不是投资建议，也不是确定买卖指令，需要人工确认。"""
 
 
@@ -1506,13 +1787,13 @@ def build_sector_heat_email_body(alert: Dict[str, Any]) -> str:
     high_60d_lines = "\n".join(format_stock_line(item) for item in alert["high_60d_stocks"]) or "- 无"
     outperformer_lines = "\n".join(format_stock_line(item) for item in alert["outperformers"]) or "- 无"
 
-    return f"""提醒类型：{alert["title"]}
-操作等级：{trade_action_level(alert["type"])}
+    return f"""提醒类型：{alert['title']}
+操作等级：{trade_action_level(alert['type'])}
 
-产业分类：{alert["sector"]}
-有效样本数：{alert["valid_count"]}
-创60日新高比例：{fmt_pct(alert["high_60d_ratio"] * 100)}
-20日明显跑赢TOPIX比例：{fmt_pct(alert["outperformer_ratio"] * 100)}
+产业分类：{alert['sector']}
+有效样本数：{alert['valid_count']}
+创60日新高比例：{fmt_pct(alert['high_60d_ratio'] * 100)}
+20日明显跑赢TOPIX比例：{fmt_pct(alert['outperformer_ratio'] * 100)}
 
 创60日新高股票：
 {high_60d_lines}
@@ -1521,8 +1802,7 @@ def build_sector_heat_email_body(alert: Dict[str, Any]) -> str:
 {outperformer_lines}
 
 {build_sector_recommendation(alert)}
-提醒：这是行业层面的热度观察，不是自动交易，也不是确定买卖指令，需要人工确认。
-"""
+提醒：这不是自动交易，也不是确定买卖指令，需要人工确认。"""
 
 
 def print_report(rows: List[Dict[str, Any]]) -> None:
@@ -1615,7 +1895,6 @@ def build_test_email_body() -> str:
 如果你收到这封邮件，说明 SMTP 配置和 SMTP_PASSWORD 环境变量可用。
 """
 
-
 def build_summary_email_body(
     benchmark_ticker: str,
     scanned_count: int,
@@ -1634,8 +1913,7 @@ def build_summary_email_body(
     run_time = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S JST")
     if combined_alerts:
         alert_lines = "\n".join(
-            f"- {item['stock'].ticker} {item['stock'].name}: "
-            f"{item['combined_alert']['title']} / {item['combined_alert']['action_level']}"
+            f"- {item['stock'].ticker} {item['stock'].name}: {item['combined_alert']['title']} / {item['combined_alert']['action_level']}"
             for item in combined_alerts
         )
     else:
@@ -1643,9 +1921,7 @@ def build_summary_email_body(
 
     if sector_alerts:
         sector_lines = "\n".join(
-            f"- {alert['sector']}: {alert['title']} "
-            f"(60日新高比例 {fmt_pct(alert['high_60d_ratio'] * 100)}, "
-            f"20日跑赢比例 {fmt_pct(alert['outperformer_ratio'] * 100)})"
+            f"- {alert['sector']}: {alert['title']} (60日新高比例 {fmt_pct(alert['high_60d_ratio'] * 100)}, 20日跑赢比例 {fmt_pct(alert['outperformer_ratio'] * 100)})"
             for alert in sector_alerts
         )
     else:
@@ -1671,8 +1947,7 @@ dry_run 状态：{dry_run}
 行业热度摘要：
 {sector_lines}
 
-提醒：这不是投资建议，不是自动交易，也不是确定买卖指令，只是观察名单提醒，需要人工确认。
-"""
+提醒：这不是投资建议，不是自动交易，也不是确定买卖指令，需要人工确认。"""
 
 
 def send_summary_email_if_needed(config: Dict[str, Any], args: argparse.Namespace, body: str) -> None:
@@ -1690,7 +1965,6 @@ def send_summary_email_if_needed(config: Dict[str, Any], args: argparse.Namespac
     send_email(config, subject, body)
     logging.info("Summary email sent")
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Monitor Japanese stock pullbacks and relative strength.")
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
@@ -1701,6 +1975,7 @@ def main() -> None:
     parser.add_argument("--export-signals", action="store_true", help="Write combined stock alerts to the signal CSV log")
     parser.add_argument("--signal-log", default=None, help="Override signal CSV log path")
     parser.add_argument("--log-signals-dry-run", action="store_true", help="Allow dry-run to write signal CSV rows")
+    parser.add_argument("--refresh-fundamentals", action="store_true", help="Refresh fundamentals cache immediately")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -1710,6 +1985,11 @@ def main() -> None:
     signal_settings = signal_log_settings(config, args)
     email_policy = email_policy_settings(config)
     summary_requested = bool(args.summary_email or email_policy["daily_summary_default"])
+    fundamentals_cfg = fundamentals_settings(config)
+    fundamentals_cache: Dict[str, Any] = {}
+    fundamentals_cache_path = str(fundamentals_cfg.get("cache_path", "fundamentals_cache.json"))
+    if fundamentals_cfg.get("enabled", True) and fundamentals_cfg.get("cache_enabled", True):
+        fundamentals_cache = load_json_file(fundamentals_cache_path, {})
     should_write_signal_log = signal_settings["enabled"] and (not args.dry_run or args.log_signals_dry_run)
     logging.info(
         "Signal log %s. path=%s dry_run_write=%s",
@@ -1755,13 +2035,21 @@ def main() -> None:
         try:
             indicators = calculate_indicators(data)
             indicators.update(calculate_relative_strength(indicators, topix_data))
+            fundamentals_data = {"data_quality": "missing", "missing_fields": []}
+            if fundamentals_cfg.get("enabled", True):
+                fundamentals_data = fetch_fundamentals_with_cache(
+                    stock.ticker,
+                    fundamentals_cfg,
+                    fundamentals_cache,
+                    refresh=bool(args.refresh_fundamentals),
+                )
             success_count += 1
             sector_results.setdefault(stock.sector, []).append((stock, indicators))
             raw_alerts = check_alert_conditions(stock, indicators, thresholds, state)
             raw_alert_count += len(raw_alerts)
             combined_alert = combine_stock_alerts(stock, indicators, raw_alerts)
             if combined_alert:
-                research_analysis = build_research_analysis(stock, indicators, config)
+                research_analysis = build_research_analysis(stock, indicators, config, fundamentals_data)
                 combined_alert["research_analysis"] = research_analysis
                 combined_alert["action_level"] = (
                     f"{research_analysis['priority']}：研究优先级。"
@@ -1805,8 +2093,15 @@ def main() -> None:
             )
         signal_log_rows.append(build_signal_log_row(stock, indicators, combined_alert, run_datetime))
         prefix = combined_alert["action_prefix"]
-        subject = f"[日本股票监控][{prefix}] {combined_alert['title']} - {stock.ticker} {stock.name}"
-        body = build_email_body(stock, indicators, combined_alert, config)
+        level_code = combined_alert.get("action_level", "C").split("：", 1)[0]
+        subject = f"[日本股票监控][{level_code}][{prefix}] {combined_alert['title']} - {stock.ticker} {stock.name}"
+        body = build_email_body(
+            stock,
+            indicators,
+            combined_alert,
+            config,
+            fundamentals=combined_alert.get("research_analysis", {}).get("fundamentals_data"),
+        )
         send_individual = should_send_individual_alert(combined_alert, email_policy)
 
         if args.dry_run and send_individual:
@@ -1913,6 +2208,8 @@ def main() -> None:
 
     if not (args.dry_run or args.report or summary_only):
         record_daily_run_state(state, summary_date, summary_sent, sent_stock_count)
+        if fundamentals_cfg.get("enabled", True) and fundamentals_cfg.get("cache_enabled", True):
+            save_json_file(fundamentals_cache_path, fundamentals_cache)
 
     if args.dry_run or args.report or summary_only:
         logging.info("Dry run: state not saved." if args.dry_run else "Read-only run: state not saved.")
@@ -1933,3 +2230,17 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+

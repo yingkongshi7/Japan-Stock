@@ -31,12 +31,12 @@ smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: hailuwang71@gmail.com
+  username: your_email@example.com
 
 email:
-  from: hailuwang71@gmail.com
+  from: your_email@example.com
   to:
-    - hailuwang71@gmail.com
+    - your_email@example.com
 
 thresholds:
   pullback_min_pct: 20
@@ -77,6 +77,23 @@ output:
   show_lot_size_analysis: true
   show_valuation_warning: true
   show_fundamental_confirmation: true
+
+fundamentals:
+  enabled: true
+  provider: yfinance
+  cache_enabled: true
+  cache_path: fundamentals_cache.json
+  cache_ttl_days: 7
+  valuation_thresholds:
+    high_per: 40
+    high_pbr: 5
+    high_psr: 8
+    high_ev_ebitda: 25
+  growth_thresholds:
+    strong_revenue_growth_pct: 10
+    strong_operating_profit_growth_pct: 10
+    weak_revenue_growth_pct: -5
+    weak_operating_profit_growth_pct: -10
 
 stocks:
   "半导体 / AI硬件":
