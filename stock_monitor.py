@@ -245,6 +245,10 @@ def calculate_indicators(data: pd.DataFrame) -> Dict[str, Any]:
     high_52w = float(signal_close.tail(252).max())
     drawdown_pct = (high_52w - last_signal_close) / high_52w * 100 if high_52w else 0
     current_ma200 = ma200.iloc[-1]
+    current_ma20 = ma20.iloc[-1]
+    current_ma50 = ma50.iloc[-1]
+    above_ma20 = bool(pd.notna(current_ma20) and last_signal_close > current_ma20)
+    above_ma50 = bool(pd.notna(current_ma50) and last_signal_close > current_ma50)
     above_ma200 = bool(pd.notna(current_ma200) and last_signal_close > current_ma200)
 
     recent_cross_above_ma200 = False
@@ -283,6 +287,8 @@ def calculate_indicators(data: pd.DataFrame) -> Dict[str, Any]:
         "ma20": float(ma20.iloc[-1]) if pd.notna(ma20.iloc[-1]) else None,
         "ma50": float(ma50.iloc[-1]) if pd.notna(ma50.iloc[-1]) else None,
         "ma200": float(current_ma200) if pd.notna(current_ma200) else None,
+        "above_ma20": above_ma20,
+        "above_ma50": above_ma50,
         "above_ma200_pct": above_ma200_pct,
         "above_ma200": above_ma200,
         "recent_cross_above_ma200": recent_cross_above_ma200,
@@ -477,6 +483,18 @@ def email_policy_settings(config: Dict[str, Any]) -> Dict[str, Any]:
         "send_individual_alerts": bool(policy.get("send_individual_alerts", True)),
         "notify_action_levels": set(str(level).strip() for level in policy.get("notify_action_levels", ["A", "B"])),
         "send_summary_when_no_notify_alerts": bool(policy.get("send_summary_when_no_notify_alerts", False)),
+        "individual_alert_types": set(
+            policy.get(
+                "individual_alert_types",
+                [
+                    "weak_deep_pullback",
+                    "pullback_but_overheated",
+                    "breakout_but_overheated",
+                    "pullback_watch",
+                    "deep_pullback_trend_intact",
+                ],
+            )
+        ),
         "send_sector_heat_individual": bool(policy.get("send_sector_heat_individual", False)),
     }
 
@@ -491,7 +509,8 @@ def is_notify_level(combined_alert: Dict[str, Any], email_policy: Dict[str, Any]
 
 
 def should_send_individual_alert(combined_alert: Dict[str, Any], policy: Dict[str, Any]) -> bool:
-    return bool(policy["send_individual_alerts"] and is_notify_level(combined_alert, policy))
+    allowed_by_type = combined_alert["type"] in policy["individual_alert_types"]
+    return bool(policy["send_individual_alerts"] and allowed_by_type and is_notify_level(combined_alert, policy))
 
 
 def prune_old_state(state: Dict[str, Any], dedup_days: int) -> None:
@@ -706,7 +725,7 @@ def fmt_num(value: Optional[float]) -> str:
 def alert_action_prefix(alert_type: str) -> str:
     """Return a short action prefix for email subjects."""
     mapping = {
-        "pullback_watch": "买入候选",
+        "pullback_watch": "观察池",
         "deep_pullback_trend_intact": "重点研究",
         "breakout_strength": "强势观察",
         "overheat_risk": "不宜追高",
@@ -720,19 +739,22 @@ def alert_action_prefix(alert_type: str) -> str:
 
 
 def trade_action_level(alert_type: str) -> str:
-    """Return the action level shown in the email body."""
+    """Return the research priority shown in the email body.
+
+    A/B/C are research priority labels, not buy ratings.
+    """
     mapping = {
-        "deep_pullback_trend_intact": "A：重点研究，可能适合分批买入",
-        "pullback_watch": "B：买入候选，可小额分批观察",
-        "breakout_strength": "C：强势观察，不宜追高重仓",
-        "overheat_risk": "D：不宜购买，避免追高",
-        "trend_weakness": "E：风险警告，不建议新买入",
-        "sector_heat": "C：行业热度上升，筛选个股，不直接追买",
-        "weak_deep_pullback": "E：高风险复查，不建议新买入",
-        "pullback_but_overheated": "C：加入观察名单，等待回踩，不宜追高",
-        "breakout_but_overheated": "C：强势观察，不宜追高",
+        "deep_pullback_trend_intact": "A：重点研究。技术形态和主题逻辑较强，但仍需人工确认估值、财报和仓位。",
+        "pullback_watch": "B：加入观察池。部分条件满足，但仍需等待基本面和估值确认。",
+        "breakout_strength": "B：强势观察。趋势较强，但不代表可以追高。",
+        "overheat_risk": "C：暂不关注。短期过热或仓位风险较高。",
+        "trend_weakness": "C：暂不关注。趋势或相对强度风险较高。",
+        "sector_heat": "B：行业热度观察。用于发现资金方向，不代表个股买入评级。",
+        "weak_deep_pullback": "C：暂不关注。深度回撤叠加趋势转弱，需要高风险复查。",
+        "pullback_but_overheated": "B：加入观察池。中期值得研究，但短线不宜追高。",
+        "breakout_but_overheated": "B：强势观察。趋势较强，但短线过热。",
     }
-    return mapping.get(alert_type, "C：仅观察")
+    return mapping.get(alert_type, "C：暂不关注。仅作为观察提醒。")
 
 
 def build_trade_recommendation(alert_type: str, indicators: Dict[str, Any]) -> str:
@@ -832,6 +854,291 @@ def build_sector_recommendation(alert: Dict[str, Any]) -> str:
 - 更好的做法是等待行业内优质股回踩20日线或50日线后再观察。
 - 行业热度提醒主要用于发现资金流入方向，而不是立即买入指令。
 """
+
+
+THEME_CONNECTIONS_BY_TICKER: Dict[str, List[str]] = {
+    "8035.T": ["半导体设备", "AI硬件"],
+    "6857.T": ["半导体测试设备", "AI硬件"],
+    "6920.T": ["半导体设备"],
+    "6146.T": ["半导体设备", "精密加工"],
+    "7735.T": ["半导体设备"],
+    "4063.T": ["半导体材料"],
+    "3436.T": ["半导体材料"],
+    "6315.T": ["半导体封装设备"],
+    "6590.T": ["半导体设备"],
+    "6526.T": ["半导体设计", "AI硬件"],
+    "6723.T": ["车载 / 功率 / 工业"],
+    "6963.T": ["车载 / 功率 / 工业"],
+    "5805.T": ["光通信", "电力设备", "AI数据中心"],
+    "5801.T": ["光通信", "电力设备", "AI数据中心"],
+    "5802.T": ["光通信", "电力设备", "AI数据中心"],
+    "5803.T": ["光通信", "AI数据中心"],
+    "6367.T": ["冷却系统", "AI数据中心"],
+    "6501.T": ["电力设备", "服务器供应链", "AI数据中心"],
+    "6503.T": ["电力设备", "工业自动化"],
+    "1942.T": ["电力施工", "AI数据中心"],
+    "1969.T": ["冷却系统", "数据中心工程"],
+    "1951.T": ["通信基础设施", "数据中心工程"],
+    "6861.T": ["工业自动化", "精密制造"],
+    "6954.T": ["工业自动化", "机器人"],
+    "6506.T": ["工业自动化", "机器人"],
+    "6645.T": ["工业自动化"],
+    "6273.T": ["工业自动化"],
+    "6383.T": ["物流自动化"],
+    "6324.T": ["机器人零部件"],
+    "6481.T": ["工业自动化", "机器人零部件"],
+    "6479.T": ["精密部件", "车载 / 工业"],
+    "7011.T": ["防卫", "能源设备"],
+    "7012.T": ["防卫", "航空航天"],
+    "7013.T": ["防卫", "航空航天", "能源设备"],
+    "6701.T": ["防卫", "服务器供应链", "AI基础设施"],
+    "6702.T": ["服务器供应链", "IT基础设施"],
+}
+
+
+def config_section(config: Optional[Dict[str, Any]], key: str, defaults: Dict[str, Any]) -> Dict[str, Any]:
+    configured = (config or {}).get(key, {}) or {}
+    merged = dict(defaults)
+    merged.update(configured)
+    return merged
+
+
+def bool_ja(value: Any) -> str:
+    return "是" if bool(value) else "否"
+
+
+def money_jpy(value: Optional[float]) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:,.0f}円"
+
+
+def pct_value(value: Any) -> Optional[float]:
+    return float(value) if value is not None else None
+
+
+def classify_technical_status(indicators: Dict[str, Any], config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    screening = config_section(
+        config,
+        "screening",
+        {
+            "deep_pullback_threshold_pct": 35,
+            "min_relative_return_vs_topix_3m_pct": -5,
+            "require_above_200dma": True,
+            "reentry_days_above_200dma": 5,
+        },
+    )
+    deep_threshold = float(screening.get("deep_pullback_threshold_pct", 35))
+    drawdown = pct_value(indicators.get("drawdown_pct")) or 0.0
+    return_6m = pct_value(indicators.get("return_6m_pct"))
+    return_20d = pct_value(indicators.get("return_20d_pct"))
+    above_ma200 = bool(indicators.get("above_ma200"))
+    above_ma20 = bool(indicators.get("above_ma20"))
+    above_ma50 = bool(indicators.get("above_ma50"))
+    recent_cross = bool(indicators.get("recent_cross_above_ma200"))
+    deep_pullback = drawdown >= deep_threshold
+
+    short_weak_long_intact = above_ma200 and not above_ma20 and not above_ma50
+    if not above_ma200 and not recent_cross:
+        classification = "趋势转坏预警"
+        interpretation = "当前价格低于200日均线，且最近5个交易日没有重新站上，暂不关注或等待重新站上200日线。"
+    elif deep_pullback and above_ma200 and short_weak_long_intact and return_6m is not None and return_6m >= 40:
+        classification = "高位强势股深回调"
+        interpretation = "高位强势股深回调，值得研究，但不等于低估；可能只是从过热区回落。"
+    elif return_6m is not None and return_6m >= 60 and return_20d is not None and return_20d < -10:
+        classification = "高位杀估值"
+        interpretation = "过去6个月涨幅仍高，但近期快速下跌，需警惕主题降温后的估值压缩。"
+    elif deep_pullback and above_ma200:
+        classification = "强势回调"
+        interpretation = "高于200日线且回撤较深，中长期趋势仍在，但回撤不等于低估。"
+    elif recent_cross and above_ma200:
+        classification = "低位反转观察"
+        interpretation = "长期低迷后重新站上200日线，可以观察反转是否得到成交量和基本面确认。"
+    else:
+        classification = "常规观察"
+        interpretation = "技术条件有部分改善，但尚未形成明确的高优先级研究信号。"
+
+    if short_weak_long_intact:
+        interpretation += " 短线偏弱，中长期趋势暂未完全破坏。"
+
+    return {
+        "deep_pullback": deep_pullback,
+        "short_weak_long_intact": short_weak_long_intact,
+        "classification": classification,
+        "interpretation": interpretation,
+    }
+
+
+def analyze_theme_relevance(stock: StockInfo) -> Dict[str, Any]:
+    connections = THEME_CONNECTIONS_BY_TICKER.get(stock.ticker, [])
+    if connections:
+        relevance = "高"
+        logic = "、".join(connections)
+        need_confirm = "是，需要查看公司具体业务收入占比和公司说明是否支持该主题。"
+    elif any(keyword in stock.sector for keyword in ["金融", "商社", "资源", "医疗"]):
+        relevance = "低"
+        logic = "与AI数据中心、半导体设备、电力冷却等主题的直接连接较弱。"
+        need_confirm = "是，不能仅凭市场叙事判断为AI受益股。"
+    else:
+        relevance = "中"
+        logic = "行业主题存在间接联系，但主营业务受益程度需要资料确认。"
+        need_confirm = "是，需要查看收入结构、订单说明和决算资料。"
+    return {"relevance": relevance, "logic": logic, "need_confirm": need_confirm}
+
+
+def analyze_valuation_risk(indicators: Dict[str, Any]) -> Dict[str, Any]:
+    drawdown = pct_value(indicators.get("drawdown_pct")) or 0.0
+    return_6m = pct_value(indicators.get("return_6m_pct"))
+    warnings = ["估值数据不足，需要人工确认。不可仅凭回撤幅度判断便宜。"]
+    if drawdown >= 20 and return_6m is not None and return_6m >= 40:
+        warnings.append("该股可能只是从过热区回落，未必已经低估。")
+    return {
+        "per": "数据不足",
+        "pbr": "数据不足",
+        "psr": "数据不足",
+        "ev_ebitda": "数据不足",
+        "roe": "数据不足",
+        "operating_margin": "数据不足",
+        "historical_percentile_5y": "数据不足",
+        "judgement": "待确认",
+        "risk": " ".join(warnings),
+    }
+
+
+def analyze_fundamentals(stock: StockInfo) -> Dict[str, Any]:
+    return {
+        "revenue_growth": "数据不足",
+        "operating_profit_growth": "数据不足",
+        "net_profit_growth": "数据不足",
+        "guidance_revision": "数据不足",
+        "operating_margin_change": "数据不足",
+        "free_cash_flow_change": "数据不足",
+        "theme_demand_comment": "数据不足",
+        "status": "待确认",
+        "support_theme": "待确认",
+        "materials": "最新决算短信 / 有価証券報告書 / 決算説明資料 / 订单和需求说明",
+        "note": "基本面数据不足，需要人工查看最新决算短信 / 有価証券報告書 / 決算説明資料。",
+    }
+
+
+def analyze_position_feasibility(indicators: Dict[str, Any], config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    user_profile = config_section(
+        config,
+        "user_profile",
+        {
+            "investable_capital_jpy": 10000000,
+            "single_stock_initial_limit_pct": 1.5,
+            "single_stock_max_limit_pct": 3.0,
+            "allow_odd_lot": False,
+        },
+    )
+    risk_labels = config_section(
+        config,
+        "risk_labels",
+        {
+            "high_position_warning_pct": 3.0,
+            "very_high_position_warning_pct": 5.0,
+        },
+    )
+    price = float(indicators.get("current_price") or 0)
+    lot_size = int(user_profile.get("lot_size", 100))
+    capital = float(user_profile.get("investable_capital_jpy", 10000000))
+    initial_limit = float(user_profile.get("single_stock_initial_limit_pct", 1.5))
+    max_limit = float(user_profile.get("single_stock_max_limit_pct", 3.0))
+    allow_odd_lot = bool(user_profile.get("allow_odd_lot", False))
+    lot_amount = price * lot_size if price else None
+    lot_pct = lot_amount / capital * 100 if lot_amount is not None and capital else None
+    high_warning = float(risk_labels.get("high_position_warning_pct", 3.0))
+    very_high_warning = float(risk_labels.get("very_high_position_warning_pct", 5.0))
+
+    if lot_pct is None:
+        advice = "一手金额无法计算，需要确认价格数据。"
+    elif lot_pct <= initial_limit:
+        advice = "一手金额在观察仓范围内。"
+    elif lot_pct <= max_limit:
+        advice = "一手金额偏大，需谨慎。"
+    elif lot_pct > very_high_warning:
+        advice = "单股初始仓位过高，不建议直接买入一手。"
+    elif lot_pct > high_warning:
+        advice = "一手金额过大，不适合直接一手买入，除非使用単元未満株 / S株 / 小额买入。"
+    else:
+        advice = "一手金额超过普通观察仓上限，需要降低单次投入。"
+
+    if allow_odd_lot and lot_pct is not None and lot_pct > initial_limit:
+        advice += " 已允许単元未満株，可优先用更小金额观察。"
+
+    return {
+        "price": price,
+        "lot_size": lot_size,
+        "lot_amount": lot_amount,
+        "capital": capital,
+        "lot_pct": lot_pct,
+        "exceeds_initial_limit": bool(lot_pct is not None and lot_pct > initial_limit),
+        "exceeds_max_limit": bool(lot_pct is not None and lot_pct > max_limit),
+        "allow_odd_lot": allow_odd_lot,
+        "advice": advice,
+    }
+
+
+def build_research_analysis(stock: StockInfo, indicators: Dict[str, Any], config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    screening = config_section(
+        config,
+        "screening",
+        {
+            "deep_pullback_threshold_pct": 35,
+            "min_relative_return_vs_topix_3m_pct": -5,
+            "require_above_200dma": True,
+            "reentry_days_above_200dma": 5,
+        },
+    )
+    technical = classify_technical_status(indicators, config)
+    theme = analyze_theme_relevance(stock)
+    valuation = analyze_valuation_risk(indicators)
+    fundamentals = analyze_fundamentals(stock)
+    position = analyze_position_feasibility(indicators, config)
+
+    relative_3m = pct_value(indicators.get("relative_topix_3m_pct"))
+    min_relative = float(screening.get("min_relative_return_vs_topix_3m_pct", -5))
+    above_ma200 = bool(indicators.get("above_ma200"))
+    high_theme = theme["relevance"] == "高"
+    trend_broken = technical["classification"] == "趋势转坏预警"
+
+    if trend_broken:
+        priority = "C"
+        final_action = "暂不关注"
+        final_note = "跌破200日线且无法收回，趋势风险优先于回撤幅度。"
+    elif position["exceeds_max_limit"] and not position["allow_odd_lot"]:
+        priority = "B" if high_theme and above_ma200 else "C"
+        final_action = "仓位过大，不适合直接买入"
+        final_note = "即使研究价值存在，一手金额也超过用户设定仓位上限。"
+    elif technical["short_weak_long_intact"]:
+        priority = "A" if high_theme and technical["deep_pullback"] else "B"
+        final_action = "等待技术企稳"
+        final_note = "短线低于20/50日均线，先等待回踩结束或重新站上短中期均线。"
+    elif high_theme and technical["deep_pullback"] and above_ma200 and (relative_3m is None or relative_3m >= min_relative):
+        priority = "A"
+        final_action = "等待财报确认"
+        final_note = "技术和主题条件较强，但估值与基本面仍需人工确认；A级代表研究优先级高，不代表买入评级。"
+    elif above_ma200 and (relative_3m is None or relative_3m >= min_relative):
+        priority = "B"
+        final_action = "重点研究" if high_theme else "小额观察"
+        final_note = "部分条件满足，可进入观察池，但仍需确认估值、财报和仓位。"
+    else:
+        priority = "C"
+        final_action = "暂不关注"
+        final_note = "主题、趋势或相对强度条件不足，先等待更清晰的信号。"
+
+    return {
+        "priority": priority,
+        "priority_note": f"{priority}级代表研究优先级，不代表买入评级。",
+        "technical": technical,
+        "theme": theme,
+        "valuation": valuation,
+        "fundamentals": fundamentals,
+        "position": position,
+        "final_action": final_action,
+        "final_note": final_note,
+    }
 
 
 def make_combined_alert(
@@ -968,42 +1275,14 @@ def build_raw_alert_lines(raw_alerts: List[Dict[str, str]]) -> str:
     return "\n".join(f"- {alert['type']}：{alert['title']}" for alert in raw_alerts) or "- 无"
 
 
-def build_entry_standard(combined_alert: Dict[str, Any], thresholds: Dict[str, Any]) -> str:
-    alert_type = combined_alert.get("type", "")
-    if alert_type == "deep_pullback_trend_intact":
-        return f"""本次入选标准：
-- 等级：A，重点研究。
-- 回撤要求：从 52 周高点回撤 ≥ {float(thresholds.get("deep_pullback_min_pct", 35)):g}%。
-- 趋势要求：必须仍在 200 日线之上，趋势未坏。
-- 相对 TOPIX：过去 3 个月相对收益 > {float(thresholds.get("trend_intact_relative_3m_min_pct", -5)):g}%。
-- 流动性：没有单独要求。
-"""
-    if alert_type == "pullback_watch":
-        return f"""本次入选标准：
-- 等级：B，买入候选。
-- 回撤要求：从 52 周高点回撤在 {float(thresholds.get("pullback_min_pct", 20)):g}%～{float(thresholds.get("pullback_max_pct", 35)):g}% 之间。
-- 趋势要求：趋势未坏，或最近 5 个交易日重新站上 200 日线。
-- 相对 TOPIX：过去 3 个月相对收益 > {float(thresholds.get("relative_3m_min_pct", -10)):g}%。
-- 流动性：过去 20 日平均成交额 ≥ {fmt_num(float(thresholds.get("min_avg_turnover_20d_jpy", 0)))} 日元。
-"""
-    return "本次入选标准：按当前提醒类型的技术条件触发。\n"
-
-
-def build_email_body(
-    stock: StockInfo,
-    indicators: Dict[str, Any],
-    combined_alert: Dict[str, Any],
-    thresholds: Dict[str, Any],
-) -> str:
+def build_email_body(stock: StockInfo, indicators: Dict[str, Any], combined_alert: Dict[str, Any]) -> str:
     above_ma200 = "是" if indicators.get("above_ma200") else "否"
     recent_cross = "是" if indicators.get("recent_cross_above_ma200") else "否"
     volume_spike = "是" if indicators.get("volume_spike") else "否"
-    entry_standard = build_entry_standard(combined_alert, thresholds)
 
     return f"""提醒类型：{combined_alert["title"]}
 操作等级：{combined_alert["action_level"]}
 
-{entry_standard}
 股票代码：{stock.ticker}
 股票名称：{stock.name}
 产业分类：{stock.sector}
@@ -1050,6 +1329,120 @@ def build_email_body(
 
 提醒：这不是自动交易，也不是确定买卖指令，只是观察名单提醒，需要人工确认。
 """
+
+
+def build_raw_alert_lines(raw_alerts: List[Dict[str, str]]) -> str:
+    return "\n".join(f"- {alert['type']}：{alert['title']}" for alert in raw_alerts) or "- 无"
+
+
+def build_email_body(
+    stock: StockInfo,
+    indicators: Dict[str, Any],
+    combined_alert: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
+) -> str:
+    analysis = combined_alert.get("research_analysis") or build_research_analysis(stock, indicators, config)
+    technical = analysis["technical"]
+    theme = analysis["theme"]
+    valuation = analysis["valuation"]
+    fundamentals = analysis["fundamentals"]
+    position = analysis["position"]
+
+    return f"""【研究提醒】
+股票代码：{stock.ticker}
+股票名称：{stock.name}
+行业主题：{stock.sector}
+数据日期：{indicators.get("last_date", "N/A")}
+
+一、研究优先级：
+
+* {analysis["priority"]}
+* 说明：{analysis["priority_note"]} A级代表研究优先级高，不代表买入评级。
+* 原始触发信号：
+{build_raw_alert_lines(combined_alert.get("raw_alerts", []))}
+
+二、技术状态：
+
+* 当前价格：{fmt_num(indicators.get("current_price"))}
+* 52周高点：{fmt_num(indicators.get("high_52w"))}
+* 从52周高点回撤：{fmt_pct(indicators.get("drawdown_pct"))}
+* 是否达到深度回撤标准：{bool_ja(technical["deep_pullback"])}
+* 说明：回撤不等于低估，只代表价格从高点明显降温。
+* 20日均线：{fmt_num(indicators.get("ma20"))}
+* 50日均线：{fmt_num(indicators.get("ma50"))}
+* 200日均线：{fmt_num(indicators.get("ma200"))}
+* 当前价格是否高于20日均线：{bool_ja(indicators.get("above_ma20"))}
+* 当前价格是否高于50日均线：{bool_ja(indicators.get("above_ma50"))}
+* 当前价格是否高于200日均线：{bool_ja(indicators.get("above_ma200"))}
+* 当前价格距离200日均线：{fmt_pct(indicators.get("above_ma200_pct"))}
+* 最近5个交易日是否重新站上200日均线：{bool_ja(indicators.get("recent_cross_above_ma200"))}
+* 过去1个月涨幅：{fmt_pct(indicators.get("return_1m_pct"))}
+* 过去3个月涨幅：{fmt_pct(indicators.get("return_3m_pct"))}
+* 过去6个月涨幅：{fmt_pct(indicators.get("return_6m_pct"))}
+* 过去60日涨幅：{fmt_pct(indicators.get("return_60d_pct"))}
+* 过去3个月TOPIX涨幅：{fmt_pct(indicators.get("topix_return_3m_pct"))}
+* 过去3个月相对TOPIX：{fmt_pct(indicators.get("relative_topix_3m_pct"))}
+* 过去20日相对TOPIX：{fmt_pct(indicators.get("relative_topix_20d_pct"))}
+* 技术分类：{technical["classification"]}
+* 技术解读：{technical["interpretation"]}
+
+三、主题相关性：
+
+* 主题相关性：{theme["relevance"]}
+* 相关逻辑：{theme["logic"]}
+* 是否需要人工确认业务收入占比：{theme["need_confirm"]}
+
+四、估值风险：
+
+* PER：{valuation["per"]}
+* PBR：{valuation["pbr"]}
+* PSR：{valuation["psr"]}
+* EV/EBITDA：{valuation["ev_ebitda"]}
+* ROE：{valuation["roe"]}
+* 营业利润率：{valuation["operating_margin"]}
+* 过去5年估值分位：{valuation["historical_percentile_5y"]}
+* 估值判断：{valuation["judgement"]}
+* 风险提示：{valuation["risk"]}
+
+五、基本面确认：
+
+* 最近季度营收增长：{fundamentals["revenue_growth"]}
+* 最近季度营业利润增长：{fundamentals["operating_profit_growth"]}
+* 最近季度净利润增长：{fundamentals["net_profit_growth"]}
+* 最近是否上修/下修业绩：{fundamentals["guidance_revision"]}
+* 营业利润率变化：{fundamentals["operating_margin_change"]}
+* 自由现金流变化：{fundamentals["free_cash_flow_change"]}
+* 主题需求说明：{fundamentals["theme_demand_comment"]}
+* 基本面状态：{fundamentals["status"]}
+* 业绩是否支持股价主题：{fundamentals["support_theme"]}
+* 需要人工查看的资料：{fundamentals["materials"]}
+* 说明：{fundamentals["note"]}
+
+六、仓位可执行性：
+
+* 当前价格：{fmt_num(position["price"])}
+* 交易单位：{position["lot_size"]}股
+* 一手金额：{money_jpy(position["lot_amount"])}
+* 用户投资资金：{money_jpy(position["capital"])}
+* 一手金额占比：{fmt_pct(position["lot_pct"])}
+* 是否超过单股初始仓位上限：{bool_ja(position["exceeds_initial_limit"])}
+* 是否超过单股最大仓位上限：{bool_ja(position["exceeds_max_limit"])}
+* 是否允许単元未満株 / S株：{bool_ja(position["allow_odd_lot"])}
+* 仓位建议：{position["advice"]}
+
+七、最终操作建议：
+
+* {analysis["final_action"]}
+* 说明：{analysis["final_note"]}
+
+八、提醒：
+
+* 本脚本只做观察，不自动交易。
+* 回撤不等于低估。
+* A级不等于买入评级。
+* 个股不进入主回撤加仓表。
+* 主策略仍应以指数定投和规则化回撤加仓为核心。
+* 这不是投资建议，也不是确定买卖指令，需要人工确认。"""
 
 
 def check_sector_heat_conditions(
@@ -1230,8 +1623,6 @@ def build_summary_email_body(
     failed_count: int,
     raw_alert_count: int,
     combined_alerts: List[Dict[str, Any]],
-    total_combined_alert_count: int,
-    notify_combined_alert_count: int,
     sent_stock_count: int,
     sector_alert_count: int,
     sent_sector_count: int,
@@ -1267,10 +1658,8 @@ Benchmark ticker：{benchmark_ticker}
 扫描股票数量：{scanned_count}
 成功取得数据的股票数量：{success_count}
 数据获取失败数量：{failed_count}
-触发 raw alert 总数量：{raw_alert_count}
-触发 combined alert 总数量：{total_combined_alert_count}
-A/B 通知信号数量：{notify_combined_alert_count}
-本摘要展示信号数量：{len(combined_alerts)}
+触发 raw alert 数量：{raw_alert_count}
+触发 combined alert 数量：{len(combined_alerts)}
 实际发送个股提醒邮件数量：{sent_stock_count}
 触发 sector heat 数量：{sector_alert_count}
 实际发送行业提醒邮件数量：{sent_sector_count}
@@ -1371,6 +1760,13 @@ def main() -> None:
             raw_alerts = check_alert_conditions(stock, indicators, thresholds, state)
             raw_alert_count += len(raw_alerts)
             combined_alert = combine_stock_alerts(stock, indicators, raw_alerts)
+            if combined_alert:
+                research_analysis = build_research_analysis(stock, indicators, config)
+                combined_alert["research_analysis"] = research_analysis
+                combined_alert["action_level"] = (
+                    f"{research_analysis['priority']}：研究优先级。"
+                    "不代表买入评级，仍需人工确认估值、财报和仓位。"
+                )
             report_rows.append(
                 {
                     "stock": stock,
@@ -1388,37 +1784,37 @@ def main() -> None:
             logging.info("No alert for %s", stock.ticker)
             continue
 
-        alert_item = {
-            "stock": stock,
-            "indicators": indicators,
-            "combined_alert": combined_alert,
-        }
-        stock_alert_items.append(alert_item)
+        if not should_send_alert(state, stock.ticker, combined_alert["type"], indicators, thresholds):
+            logging.info("Alert for %s %s suppressed by dedup state", stock.ticker, combined_alert["type"])
+            continue
 
-        # CSV is the research log, not the email log. Record every combined signal,
-        # including C/D/E, without applying alert-state deduplication.
+        stock_alert_items.append(
+            {
+                "stock": stock,
+                "indicators": indicators,
+                "combined_alert": combined_alert,
+            }
+        )
+        if is_notify_level(combined_alert, email_policy):
+            notify_alert_items.append(
+                {
+                    "stock": stock,
+                    "indicators": indicators,
+                    "combined_alert": combined_alert,
+                }
+            )
         signal_log_rows.append(build_signal_log_row(stock, indicators, combined_alert, run_datetime))
-
-        is_notify_alert = is_notify_level(combined_alert, email_policy)
-        dedup_allows_email = True
-        if is_notify_alert:
-            dedup_allows_email = should_send_alert(state, stock.ticker, combined_alert["type"], indicators, thresholds)
-            if dedup_allows_email:
-                notify_alert_items.append(alert_item)
-            else:
-                logging.info("Notify-level alert for %s %s suppressed by dedup state", stock.ticker, combined_alert["type"])
-
         prefix = combined_alert["action_prefix"]
         subject = f"[日本股票监控][{prefix}] {combined_alert['title']} - {stock.ticker} {stock.name}"
-        body = build_email_body(stock, indicators, combined_alert, thresholds)
-        send_individual = should_send_individual_alert(combined_alert, email_policy) and dedup_allows_email
+        body = build_email_body(stock, indicators, combined_alert, config)
+        send_individual = should_send_individual_alert(combined_alert, email_policy)
 
         if args.dry_run and send_individual:
             print("=" * 80)
             print(subject)
             print(body)
         elif args.dry_run:
-            logging.info("Individual email suppressed by policy or dedup for %s %s", stock.ticker, combined_alert["type"])
+            logging.info("Individual email suppressed by policy for %s %s", stock.ticker, combined_alert["type"])
         elif not args.report and not summary_only and send_individual:
             try:
                 send_email(config, subject, body)
@@ -1429,7 +1825,7 @@ def main() -> None:
                 logging.exception("Failed to send email for %s: %s", stock.ticker, exc)
                 continue
         else:
-            logging.info("Individual email suppressed by policy or dedup for %s %s", stock.ticker, combined_alert["type"])
+            logging.info("Individual email suppressed by policy for %s %s", stock.ticker, combined_alert["type"])
 
     sector_alerts = check_sector_heat_conditions(sector_results, thresholds, state)
     for sector_alert in sector_alerts:
@@ -1473,8 +1869,6 @@ def main() -> None:
         failed_count=failed_count,
         raw_alert_count=raw_alert_count,
         combined_alerts=summary_alert_items,
-        total_combined_alert_count=len(stock_alert_items),
-        notify_combined_alert_count=len(notify_alert_items),
         sent_stock_count=sent_stock_count,
         sector_alert_count=len(sector_alerts),
         sent_sector_count=sent_sector_count,

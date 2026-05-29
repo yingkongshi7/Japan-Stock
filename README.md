@@ -56,6 +56,34 @@ Manual `workflow_dispatch` modes:
 - `test-email`: `python stock_monitor.py --test-email`
 - `summary-email`: `python stock_monitor.py --summary-email`
 
+## Research Priority And Risk Layers
+
+The script now treats `A / B / C` as research priority, not buy ratings:
+
+- `A`: high research priority. Technical setup and theme logic look stronger, but valuation, earnings, and position size still require manual confirmation.
+- `B`: watchlist candidate. Some conditions are met, but it is not an automatic buy signal.
+- `C`: low priority for now. Trend, theme, relative strength, or risk conditions are not attractive enough.
+
+Every stock alert separates:
+
+- Technical status: drawdown, 20/50/200-day moving averages, distance from the 200-day average, reentry above the 200-day average, and trend class.
+- Theme relevance: high / medium / low, with the company-theme connection such as AI data centers, optical communication, power equipment, cooling systems, semiconductor equipment, server supply chain, or industrial/auto power devices.
+- Valuation risk: PER, PBR, PSR, EV/EBITDA, ROE, operating margin, and 5-year valuation percentile fields are shown. When data is unavailable, the email explicitly says valuation data is insufficient and must be checked manually.
+- Fundamental confirmation: revenue, operating profit, net profit, guidance revision, margin, free cash flow, and order/theme demand fields are shown. When data is unavailable, the email asks the user to review latest 決算短信 / 有価証券報告書 / 決算説明資料.
+- Position feasibility: the script calculates one trading unit as 100 shares by default, one-lot amount, and one-lot percentage of configured investable capital.
+
+Position configuration:
+
+```yaml
+user_profile:
+  investable_capital_jpy: 10000000
+  single_stock_initial_limit_pct: 1.5
+  single_stock_max_limit_pct: 3.0
+  allow_odd_lot: false
+```
+
+If one lot is above the configured limit, the email says the stock is too large for a direct one-lot entry unless using 単元未満株 / S株 / small amount buying. This is an observation and position-risk prompt, not a trading instruction.
+
 ## Email Policy
 
 The default email policy is summary-first to reduce inbox noise:
@@ -79,7 +107,7 @@ email_policy:
 
 Normal runs send one daily summary by default only when there are notify-level signals. Individual stock emails are sent only for higher-priority combined signals. `overheat_risk`, `trend_weakness`, and `sector_heat` are still recorded in the CSV and logs, but they do not send separate emails and do not appear in the ordinary daily summary by default.
 
-The ordinary scheduled notification now focuses on A/B action levels. C/D/E signals are still recorded in `stock_signal_log.csv` and logs, but they do not appear in the normal daily notification. To restore C-level emails and summary entries, add `C` to `notify_action_levels`.
+The ordinary scheduled notification now focuses on A/B research-priority levels. C signals are still recorded in `stock_signal_log.csv` and logs, but they do not appear in the normal daily notification. To restore C-level emails and summary entries, add `C` to `notify_action_levels`.
 
 Daily runs are deduplicated in `alert_state.json` under `daily_runs` by JST date. The primary and backup schedules can both exist, but after one normal run completes, the backup run exits without sending mail. The workflow pulls the latest branch state before running the script and uses GitHub Actions concurrency to avoid overlapping monitor runs on the same branch.
 

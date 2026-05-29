@@ -19,18 +19,24 @@ email_policy:
     - A
     - B
   send_summary_when_no_notify_alerts: false
+  individual_alert_types:
+    - weak_deep_pullback
+    - pullback_but_overheated
+    - breakout_but_overheated
+    - pullback_watch
+    - deep_pullback_trend_intact
   send_sector_heat_individual: false
 
 smtp:
   host: smtp.gmail.com
   port: 587
   use_tls: true
-  username: hailuwang71@gmail.com
+  username: your_email@example.com
 
 email:
-  from: hailuwang71@gmail.com
+  from: your_email@example.com
   to:
-    - hailuwang71@gmail.com
+    - your_email@example.com
 
 thresholds:
   pullback_min_pct: 20
@@ -49,6 +55,28 @@ thresholds:
   overheat_volume_spike_days: 3
   dedup_days: 30
   extra_drawdown_pct: 10
+
+user_profile:
+  investable_capital_jpy: 10000000
+  single_stock_initial_limit_pct: 1.5
+  single_stock_max_limit_pct: 3.0
+  allow_odd_lot: false
+
+screening:
+  deep_pullback_threshold_pct: 35
+  min_relative_return_vs_topix_3m_pct: -5
+  require_above_200dma: true
+  reentry_days_above_200dma: 5
+
+risk_labels:
+  high_position_warning_pct: 3.0
+  very_high_position_warning_pct: 5.0
+
+output:
+  distinguish_research_and_buy_rating: true
+  show_lot_size_analysis: true
+  show_valuation_warning: true
+  show_fundamental_confirmation: true
 
 stocks:
   "半导体 / AI硬件":
