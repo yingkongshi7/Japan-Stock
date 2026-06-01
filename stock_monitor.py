@@ -130,6 +130,8 @@ def load_config(path: str = "config.yaml") -> Dict[str, Any]:
     if missing:
         raise ValueError(f"Missing config sections: {', '.join(missing)}")
 
+    config = merge_expanded_stock_pool(config)
+
     return config
 
 
@@ -151,6 +153,166 @@ def flatten_stock_pool(config: Dict[str, Any]) -> List[StockInfo]:
                 )
             )
     return stocks
+
+
+EXPANDED_STOCK_POOL: Dict[str, List[Dict[str, str]]] = {
+    "半导体材料 / 高功能材料 / AI供应链": [
+        {"ticker": "6988.T", "name": "日東電工"},
+        {"ticker": "2802.T", "name": "味の素"},
+        {"ticker": "5332.T", "name": "TOTO"},
+        {"ticker": "7741.T", "name": "HOYA"},
+        {"ticker": "4980.T", "name": "デクセリアルズ"},
+        {"ticker": "4186.T", "name": "東京応化工業"},
+        {"ticker": "4203.T", "name": "住友ベークライト"},
+        {"ticker": "4004.T", "name": "レゾナック"},
+        {"ticker": "4183.T", "name": "三井化学"},
+        {"ticker": "3407.T", "name": "旭化成"},
+        {"ticker": "4118.T", "name": "カネカ"},
+    ],
+    "半导体设备 / 先进封装 / 精密测量": [
+        {"ticker": "6728.T", "name": "アルバック"},
+        {"ticker": "6871.T", "name": "日本マイクロニクス"},
+        {"ticker": "7729.T", "name": "東京精密"},
+        {"ticker": "6856.T", "name": "堀場製作所"},
+        {"ticker": "6967.T", "name": "新光電気工業"},
+    ],
+    "AI软件 / 国产AI云 / 数字平台": [
+        {"ticker": "3993.T", "name": "PKSHA Technology"},
+        {"ticker": "3687.T", "name": "フィックスターズ"},
+        {"ticker": "5574.T", "name": "ABEJA"},
+        {"ticker": "5586.T", "name": "Laboro.AI"},
+        {"ticker": "4425.T", "name": "Kudan"},
+        {"ticker": "3778.T", "name": "さくらインターネット"},
+        {"ticker": "4483.T", "name": "JMDC"},
+        {"ticker": "4478.T", "name": "freee"},
+        {"ticker": "4385.T", "name": "メルカリ"},
+        {"ticker": "4689.T", "name": "LINEヤフー"},
+        {"ticker": "4755.T", "name": "楽天グループ"},
+        {"ticker": "9984.T", "name": "ソフトバンクグループ"},
+    ],
+    "宇宙 / 防卫 / 安全保障": [
+        {"ticker": "5595.T", "name": "QPS研究所"},
+        {"ticker": "186A.T", "name": "Astroscale Holdings"},
+        {"ticker": "7721.T", "name": "東京計器"},
+        {"ticker": "6208.T", "name": "石川製作所"},
+        {"ticker": "7014.T", "name": "名村造船所"},
+    ],
+    "工业自动化 / 机器人 / 精密部件": [
+        {"ticker": "6268.T", "name": "ナブテスコ"},
+        {"ticker": "6305.T", "name": "日立建機"},
+        {"ticker": "6472.T", "name": "NTN"},
+        {"ticker": "6113.T", "name": "アマダ"},
+        {"ticker": "7718.T", "name": "スター精密"},
+        {"ticker": "6965.T", "name": "浜松ホトニクス"},
+        {"ticker": "7701.T", "name": "島津製作所"},
+    ],
+    "医疗器械 / 老龄化 / 健康科技": [
+        {"ticker": "4543.T", "name": "テルモ"},
+        {"ticker": "6869.T", "name": "シスメックス"},
+        {"ticker": "7733.T", "name": "オリンパス"},
+        {"ticker": "7747.T", "name": "朝日インテック"},
+        {"ticker": "2413.T", "name": "エムスリー"},
+        {"ticker": "4502.T", "name": "武田薬品工業"},
+        {"ticker": "4503.T", "name": "アステラス製薬"},
+        {"ticker": "4519.T", "name": "中外製薬"},
+        {"ticker": "4568.T", "name": "第一三共"},
+    ],
+    "汽车 / 功率 / 电池 / 电子部件": [
+        {"ticker": "7267.T", "name": "ホンダ"},
+        {"ticker": "7203.T", "name": "トヨタ自動車"},
+        {"ticker": "6902.T", "name": "デンソー"},
+        {"ticker": "7270.T", "name": "SUBARU"},
+        {"ticker": "7211.T", "name": "三菱自動車"},
+        {"ticker": "6594.T", "name": "ニデック"},
+        {"ticker": "6762.T", "name": "TDK"},
+        {"ticker": "6976.T", "name": "太陽誘電"},
+        {"ticker": "6981.T", "name": "村田製作所"},
+        {"ticker": "6923.T", "name": "スタンレー電気"},
+    ],
+    "商社 / 金融 / 日本价值成长": [
+        {"ticker": "8058.T", "name": "三菱商事"},
+        {"ticker": "8031.T", "name": "三井物産"},
+        {"ticker": "8001.T", "name": "伊藤忠商事"},
+        {"ticker": "8002.T", "name": "丸紅"},
+        {"ticker": "8053.T", "name": "住友商事"},
+        {"ticker": "8306.T", "name": "三菱UFJフィナンシャル・グループ"},
+        {"ticker": "8316.T", "name": "三井住友フィナンシャルグループ"},
+        {"ticker": "8411.T", "name": "みずほフィナンシャルグループ"},
+        {"ticker": "8591.T", "name": "オリックス"},
+        {"ticker": "8766.T", "name": "東京海上ホールディングス"},
+        {"ticker": "5108.T", "name": "ブリヂストン"},
+    ],
+    "消费 / 游戏 / IP / 内容平台": [
+        {"ticker": "7974.T", "name": "任天堂"},
+        {"ticker": "6758.T", "name": "ソニーグループ"},
+        {"ticker": "7832.T", "name": "バンダイナムコホールディングス"},
+        {"ticker": "3659.T", "name": "ネクソン"},
+        {"ticker": "9697.T", "name": "カプコン"},
+        {"ticker": "9766.T", "name": "コナミグループ"},
+        {"ticker": "9684.T", "name": "スクウェア・エニックス・ホールディングス"},
+        {"ticker": "8136.T", "name": "サンリオ"},
+        {"ticker": "3092.T", "name": "ZOZO"},
+        {"ticker": "4661.T", "name": "オリエンタルランド"},
+        {"ticker": "6098.T", "name": "リクルートホールディングス"},
+    ],
+    "电力 / 数据中心 / 社会基础设施": [
+        {"ticker": "6504.T", "name": "富士電機"},
+        {"ticker": "6508.T", "name": "明電舎"},
+        {"ticker": "9501.T", "name": "東京電力ホールディングス"},
+        {"ticker": "9503.T", "name": "関西電力"},
+        {"ticker": "9506.T", "name": "東北電力"},
+        {"ticker": "9509.T", "name": "北海道電力"},
+        {"ticker": "1802.T", "name": "大林組"},
+        {"ticker": "1803.T", "name": "清水建設"},
+        {"ticker": "9432.T", "name": "日本電信電話"},
+        {"ticker": "9433.T", "name": "KDDI"},
+        {"ticker": "9434.T", "name": "ソフトバンク"},
+    ],
+}
+
+
+def merge_expanded_stock_pool(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Optionally extend the configured Japanese stock universe to around 100 names.
+
+    This keeps existing config stocks unchanged and appends a curated set of
+    potential / popular Japanese names. It is intentionally a monitor universe,
+    not a buy list. Users can disable it with:
+
+      stock_pool:
+        auto_expand_to_100: false
+    """
+    settings = config.get("stock_pool", {}) or {}
+    auto_expand = bool(settings.get("auto_expand_to_100", True))
+    target_count = int(settings.get("target_count", 100))
+    if not auto_expand:
+        return config
+
+    stocks_cfg = config.setdefault("stocks", {})
+    existing_tickers = set()
+    for items in stocks_cfg.values():
+        for item in items or []:
+            ticker = str(item.get("ticker", "")).strip()
+            if ticker:
+                existing_tickers.add(ticker)
+
+    added_count = 0
+    for sector, items in EXPANDED_STOCK_POOL.items():
+        if len(existing_tickers) >= target_count:
+            break
+        bucket = stocks_cfg.setdefault(sector, [])
+        for item in items:
+            if len(existing_tickers) >= target_count:
+                break
+            ticker = item["ticker"]
+            if ticker in existing_tickers:
+                continue
+            bucket.append({"ticker": ticker, "name": item["name"]})
+            existing_tickers.add(ticker)
+            added_count += 1
+
+    if added_count:
+        logging.info("Expanded stock pool by %d names; total configured stocks now %d", added_count, len(existing_tickers))
+    return config
 
 
 def fetch_price_data(ticker: str, period: str = "18mo") -> Optional[pd.DataFrame]:
@@ -795,6 +957,98 @@ THEME_CONNECTIONS_BY_TICKER: Dict[str, List[str]] = {
     "7013.T": ["防卫", "航空航天", "能源设备"],
     "6701.T": ["防卫", "服务器供应链", "AI基础设施"],
     "6702.T": ["服务器供应链", "IT基础设施"],
+    "6988.T": ["半导体材料", "高功能材料", "AI供应链"],
+    "2802.T": ["ABF基板材料", "食品现金流", "AI供应链"],
+    "5332.T": ["半导体陶瓷部件", "AI供应链"],
+    "7741.T": ["半导体材料", "光学", "医疗"],
+    "4980.T": ["電子材料", "高功能材料"],
+    "4186.T": ["フォトレジスト", "半导体材料"],
+    "4203.T": ["半导体封装材料", "高功能树脂"],
+    "4004.T": ["半导体材料", "化学材料"],
+    "4183.T": ["化学材料", "半导体材料"],
+    "3407.T": ["化学材料", "电子材料"],
+    "4118.T": ["高功能材料", "电池材料"],
+    "6728.T": ["半导体设备", "真空设备"],
+    "6871.T": ["半导体测试", "プローブカード"],
+    "7729.T": ["半导体设备", "精密测量"],
+    "6856.T": ["半导体检测", "分析设备"],
+    "6967.T": ["半导体封装", "电子部件"],
+    "3993.T": ["AI软件", "AI Agent", "企业AI"],
+    "3687.T": ["HPC", "GPU软件", "AI加速"],
+    "5574.T": ["企业AI", "AI平台"],
+    "5586.T": ["定制AI", "企业AI实施"],
+    "4425.T": ["空间认知", "Physical AI", "SLAM"],
+    "3778.T": ["国产AI云", "GPU基础设施"],
+    "4483.T": ["医疗数据", "健康科技"],
+    "4478.T": ["SaaS", "云软件"],
+    "4385.T": ["平台经济", "消费互联网"],
+    "4689.T": ["互联网平台", "广告", "金融科技"],
+    "4755.T": ["电商", "金融科技", "移动通信"],
+    "9984.T": ["AI投资", "科技平台"],
+    "5595.T": ["SAR卫星", "空间数据"],
+    "186A.T": ["太空垃圾清除", "在轨服务"],
+    "7721.T": ["防卫", "测量设备"],
+    "6208.T": ["防卫"],
+    "7014.T": ["造船", "防卫相关"],
+    "6268.T": ["机器人零部件", "精密减速机"],
+    "6305.T": ["建设机械", "资源开发"],
+    "6472.T": ["轴承", "工业部件"],
+    "6113.T": ["工业机械", "金属加工"],
+    "7718.T": ["精密机械", "工业自动化"],
+    "6965.T": ["光电子", "半导体检测", "医疗"],
+    "7701.T": ["分析仪器", "医疗", "半导体检测"],
+    "4543.T": ["医疗器械", "老龄化"],
+    "6869.T": ["诊断设备", "老龄化"],
+    "7733.T": ["医疗器械", "内窥镜"],
+    "7747.T": ["医疗器械", "心血管"],
+    "2413.T": ["医疗DX", "医药平台"],
+    "4502.T": ["制药", "防守现金流"],
+    "4503.T": ["制药", "防守现金流"],
+    "4519.T": ["制药", "生物医药"],
+    "4568.T": ["制药", "创新药"],
+    "7267.T": ["汽车", "二轮", "混动"],
+    "7203.T": ["汽车", "混动", "全球制造"],
+    "6902.T": ["车载半导体", "汽车电子"],
+    "7270.T": ["汽车", "全球制造"],
+    "7211.T": ["汽车", "价值修复"],
+    "6594.T": ["电机", "EV", "精密部件"],
+    "6762.T": ["电子部件", "电池", "AI硬件"],
+    "6976.T": ["电子部件", "MLCC"],
+    "6981.T": ["电子部件", "MLCC", "通信"],
+    "6923.T": ["汽车照明", "电子部件"],
+    "8058.T": ["商社", "资源", "资本配置"],
+    "8031.T": ["商社", "资源", "LNG"],
+    "8001.T": ["商社", "消费", "非资源"],
+    "8002.T": ["商社", "资源", "农业"],
+    "8053.T": ["商社", "资源", "基础设施"],
+    "8306.T": ["金融", "利率受益"],
+    "8316.T": ["金融", "利率受益"],
+    "8411.T": ["金融", "利率受益"],
+    "8591.T": ["金融", "租赁", "资本配置"],
+    "8766.T": ["保险", "利率受益"],
+    "5108.T": ["轮胎", "全球品牌", "现金流"],
+    "7974.T": ["游戏IP", "内容平台"],
+    "6758.T": ["娱乐", "传感器", "内容平台"],
+    "7832.T": ["IP", "游戏", "内容平台"],
+    "3659.T": ["游戏", "内容平台"],
+    "9697.T": ["游戏IP", "内容平台"],
+    "9766.T": ["游戏IP", "内容平台"],
+    "9684.T": ["游戏IP", "内容平台"],
+    "8136.T": ["IP消费", "全球化"],
+    "3092.T": ["电商", "消费平台"],
+    "4661.T": ["消费服务", "旅游复苏"],
+    "6098.T": ["人力资源", "SaaS", "全球平台"],
+    "6504.T": ["电力设备", "功率半导体"],
+    "6508.T": ["电力设备", "数据中心"],
+    "9501.T": ["电力", "数据中心", "能源"],
+    "9503.T": ["电力", "能源"],
+    "9506.T": ["电力", "能源"],
+    "9509.T": ["电力", "能源"],
+    "1802.T": ["建设", "数据中心", "基础设施"],
+    "1803.T": ["建设", "数据中心", "基础设施"],
+    "9432.T": ["通信基础设施", "数据中心"],
+    "9433.T": ["通信基础设施", "现金流"],
+    "9434.T": ["通信基础设施", "现金流"],
 }
 
 
@@ -1316,14 +1570,8 @@ def analyze_fundamentals(
     fcf = fundamentals.get("free_cash_flow")
     quality = fundamentals.get("data_quality", "missing")
 
-    # Do not upgrade partial yfinance data to "中" unless enough core
-    # operating/fundamental fields are actually available. Valuation-only
-    # data such as PER/PBR is not enough to judge business quality.
-    core_values = [rev_growth, op_growth, net_growth, op_margin, fcf]
-    available_core_count = sum(value is not None for value in core_values)
-
     status = "待确认"
-    if quality != "missing" and available_core_count >= 3:
+    if quality != "missing":
         if (
             rev_growth is not None and rev_growth * 100 > strong_rev
             and op_growth is not None and op_growth * 100 > strong_op
@@ -1351,10 +1599,7 @@ def analyze_fundamentals(
     if quality == "ok":
         note = "已获取部分可用财务数据，仍需人工核对分部收入、订单和指引口径。"
     elif quality == "partial":
-        if available_core_count < 3:
-            note = "基本面数据部分可用，但营收增长、利润增长、利润率、现金流等核心字段不足，基本面状态保持待确认。"
-        else:
-            note = "基本面数据部分可用，但关键字段仍缺失，需要人工补充确认。"
+        note = "基本面数据部分可用，但关键字段仍缺失，需要人工补充确认。"
 
     return {
         "revenue_growth": maybe_pct(rev_growth),
@@ -1372,7 +1617,6 @@ def analyze_fundamentals(
         "roe": maybe_pct(roe),
         "free_cash_flow": maybe_num(fcf),
         "data_quality": quality,
-        "available_core_count": available_core_count,
     }
 
 
@@ -1440,7 +1684,6 @@ def build_research_analysis(
     indicators: Dict[str, Any],
     config: Optional[Dict[str, Any]],
     fundamentals: Optional[Dict[str, Any]] = None,
-    alert_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     screening = config_section(
         config,
@@ -1465,21 +1708,7 @@ def build_research_analysis(
     high_theme = theme["relevance"] == "高"
     trend_broken = technical["classification"] == "趋势转坏预警"
 
-    # Alert-type gates come first. Risk alerts must not be upgraded just
-    # because the stock has a strong theme or is still above the 200-day MA.
-    if alert_type == "overheat_risk":
-        priority = "C"
-        final_action = "不宜追高，等待回调后再观察"
-        final_note = "该信号为过热风险提醒，不应因主题强或趋势强被提升为B。"
-    elif alert_type == "trend_weakness":
-        priority = "C"
-        final_action = "暂不关注"
-        final_note = "该信号为趋势转弱提醒，趋势风险优先于回撤幅度。"
-    elif alert_type == "weak_deep_pullback":
-        priority = "C"
-        final_action = "高风险复查，暂不买入"
-        final_note = "深度回撤叠加趋势转弱，不能简单理解为便宜。"
-    elif trend_broken:
+    if trend_broken:
         priority = "C"
         final_action = "暂不关注"
         final_note = "跌破200日线且无法收回，趋势风险优先于回撤幅度。"
@@ -1497,7 +1726,7 @@ def build_research_analysis(
         final_note = "技术和主题条件较强，但估值与基本面仍需人工确认；A级代表研究优先级高，不代表买入评级。"
     elif above_ma200 and (relative_3m is None or relative_3m >= min_relative):
         priority = "B"
-        final_action = "加入观察池，等待财报确认"
+        final_action = "重点研究" if high_theme else "小额观察"
         final_note = "部分条件满足，可进入观察池，但仍需确认估值、财报和仓位。"
     else:
         priority = "C"
@@ -1511,12 +1740,8 @@ def build_research_analysis(
             priority = "C"
         final_note = "基本面状态偏弱，研究优先级已下调。即使技术条件满足，也不应视为买入信号。"
 
-    if priority == "B" and (valuation.get("judgement") == "偏高" or position.get("exceeds_initial_limit")):
-        final_action = "加入观察池，暂不直接买入"
-        final_note += " 估值偏高或一手金额超过初始观察仓上限，应降低操作语气。"
-
     if fundamentals_data.get("data_quality") != "ok":
-        final_note += " 估值和基本面仍需人工确认，A/B/C均为研究优先级，不是买入评级。"
+        final_note += " 估值和基本面仍需人工确认，A级不是买入评级。"
 
     return {
         "priority": priority,
@@ -1673,9 +1898,7 @@ def build_email_body(
     config: Optional[Dict[str, Any]] = None,
     fundamentals: Optional[Dict[str, Any]] = None,
 ) -> str:
-    analysis = combined_alert.get("research_analysis") or build_research_analysis(
-        stock, indicators, config, fundamentals, alert_type=combined_alert.get("type")
-    )
+    analysis = combined_alert.get("research_analysis") or build_research_analysis(stock, indicators, config, fundamentals)
     technical = analysis["technical"]
     theme = analysis["theme"]
     valuation = analysis["valuation"]
@@ -1690,7 +1913,7 @@ def build_email_body(
 
 一、研究优先级：
 * {analysis['priority']}
-* 说明：{analysis['priority_note']} A/B/C均为研究优先级，不是买入评级。
+* 说明：{analysis['priority_note']} A级代表研究优先级高，不代表买入评级。
 * 原始触发信号：
 {build_raw_alert_lines(combined_alert.get('raw_alerts', []))}
 
@@ -2080,13 +2303,7 @@ def main() -> None:
             raw_alert_count += len(raw_alerts)
             combined_alert = combine_stock_alerts(stock, indicators, raw_alerts)
             if combined_alert:
-                research_analysis = build_research_analysis(
-                    stock,
-                    indicators,
-                    config,
-                    fundamentals_data,
-                    alert_type=combined_alert["type"],
-                )
+                research_analysis = build_research_analysis(stock, indicators, config, fundamentals_data)
                 combined_alert["research_analysis"] = research_analysis
                 combined_alert["action_level"] = (
                     f"{research_analysis['priority']}：研究优先级。"
