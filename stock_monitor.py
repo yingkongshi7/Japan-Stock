@@ -161,6 +161,10 @@ EXPANDED_STOCK_POOL: Dict[str, List[Dict[str, str]]] = {
         {"ticker": "4401.T", "name": "ADEKA"},
         {"ticker": "4094.T", "name": "日本化学産業"},
         {"ticker": "5016.T", "name": "JX金属"},
+        {"ticker": "6777.T", "name": "santec Holdings"},
+        {"ticker": "6965.T", "name": "浜松ホトニクス"},
+        {"ticker": "6613.T", "name": "QD Laser"},
+        {"ticker": "4980.T", "name": "デクセリアルズ"},
         {"ticker": "4369.T", "name": "トリケミカル研究所"},
         {"ticker": "4187.T", "name": "大阪有機化学工業"},
         {"ticker": "4047.T", "name": "関東電化工業"},
@@ -332,14 +336,15 @@ def merge_expanded_stock_pool(config: Dict[str, Any]) -> Dict[str, Any]:
 
     This keeps existing config stocks unchanged and appends a curated set of
     potential / popular Japanese names. It is intentionally a monitor universe,
-    not a buy list. Users can disable it with:
+    not a buy list. The default target is 160 after adding the optical/CPO
+    candidates discussed on 2026-06-03. Users can disable it with:
 
       stock_pool:
         auto_expand_to_100: false
     """
     settings = config.get("stock_pool", {}) or {}
     auto_expand = bool(settings.get("auto_expand_to_100", True))
-    target_count = int(settings.get("target_count", 150))
+    target_count = int(settings.get("target_count", 160))
     if not auto_expand:
         return config
 
@@ -1114,6 +1119,10 @@ AI_SUPPLY_CHAIN_FOCUS_CONNECTIONS: Dict[str, List[str]] = {
     "4401.T": ["High-k材料", "ALD/CVD前驱体", "EUV/ArF光刻材料", "先进制程", "AI供应链瓶颈"],
     "4094.T": ["金属盐", "电子材料", "表面处理", "冷门材料验证"],
     "5016.T": ["InP基板", "化合物半导体", "光通信材料", "AI光互联"],
+    "6777.T": ["光通信测试", "光模块测试设备", "硅光测试", "800G/1.6T卖铲人"],
+    "6965.T": ["光子器件", "光电转换", "硅光/CPO观察", "光学传感/检测"],
+    "6613.T": ["量子点激光器", "硅光片上光源", "CPO技术期权", "高风险观察"],
+    "4980.T": ["ACF", "精密接合材料", "光通信封装材料", "高功能材料"],
     "4369.T": ["高纯半导体材料", "前驱体", "先进制程"],
     "4187.T": ["电子材料", "功能性丙烯酸酯", "光刻/树脂原料"],
     "4047.T": ["特殊气体", "电子材料", "半导体工艺材料"],
