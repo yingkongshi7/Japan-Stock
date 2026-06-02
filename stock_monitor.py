@@ -156,6 +156,62 @@ def flatten_stock_pool(config: Dict[str, Any]) -> List[StockInfo]:
 
 
 EXPANDED_STOCK_POOL: Dict[str, List[Dict[str, str]]] = {
+    "AI供应链瓶颈重点观察 / 材料・检测・连接・电力": [
+        # 2026-06 added focus universe: not a buy list, only monitor candidates.
+        {"ticker": "4401.T", "name": "ADEKA"},
+        {"ticker": "4094.T", "name": "日本化学産業"},
+        {"ticker": "5016.T", "name": "JX金属"},
+        {"ticker": "4369.T", "name": "トリケミカル研究所"},
+        {"ticker": "4187.T", "name": "大阪有機化学工業"},
+        {"ticker": "4047.T", "name": "関東電化工業"},
+        {"ticker": "4109.T", "name": "ステラケミファ"},
+        {"ticker": "5344.T", "name": "MARUWA"},
+        {"ticker": "5333.T", "name": "日本ガイシ"},
+        {"ticker": "6890.T", "name": "フェローテック"},
+        {"ticker": "4061.T", "name": "デンカ"},
+        {"ticker": "5310.T", "name": "東洋炭素"},
+        {"ticker": "7966.T", "name": "リンテック"},
+        {"ticker": "6971.T", "name": "京セラ"},
+        {"ticker": "4186.T", "name": "東京応化工業"},
+        {"ticker": "4063.T", "name": "信越化学工業"},
+        {"ticker": "3436.T", "name": "SUMCO"},
+        {"ticker": "6857.T", "name": "アドバンテスト"},
+        {"ticker": "6920.T", "name": "レーザーテック"},
+        {"ticker": "7729.T", "name": "東京精密"},
+        {"ticker": "6855.T", "name": "日本電子材料"},
+        {"ticker": "6871.T", "name": "日本マイクロニクス"},
+        {"ticker": "6941.T", "name": "山一電機"},
+        {"ticker": "6614.T", "name": "シキノハイテック"},
+        {"ticker": "6656.T", "name": "インスペック"},
+        {"ticker": "6338.T", "name": "タカトリ"},
+        {"ticker": "6387.T", "name": "サムコ"},
+        {"ticker": "6728.T", "name": "アルバック"},
+        {"ticker": "6590.T", "name": "芝浦メカトロニクス"},
+        {"ticker": "6146.T", "name": "ディスコ"},
+        {"ticker": "6315.T", "name": "TOWA"},
+        {"ticker": "5801.T", "name": "古河電気工業"},
+        {"ticker": "5802.T", "name": "住友電気工業"},
+        {"ticker": "5803.T", "name": "フジクラ"},
+        {"ticker": "5805.T", "name": "SWCC"},
+        {"ticker": "6806.T", "name": "ヒロセ電機"},
+        {"ticker": "6908.T", "name": "イリソ電子工業"},
+        {"ticker": "6807.T", "name": "日本航空電子工業"},
+        {"ticker": "6804.T", "name": "ホシデン"},
+        {"ticker": "6798.T", "name": "SMK"},
+        {"ticker": "6640.T", "name": "I-PEX"},
+        {"ticker": "6622.T", "name": "ダイヘン"},
+        {"ticker": "6996.T", "name": "ニチコン"},
+        {"ticker": "6997.T", "name": "日本ケミコン"},
+        {"ticker": "6963.T", "name": "ローム"},
+        {"ticker": "6503.T", "name": "三菱電機"},
+        {"ticker": "6504.T", "name": "富士電機"},
+        {"ticker": "6508.T", "name": "明電舎"},
+        {"ticker": "6762.T", "name": "TDK"},
+        {"ticker": "6981.T", "name": "村田製作所"},
+        {"ticker": "6988.T", "name": "日東電工"},
+        {"ticker": "4118.T", "name": "カネカ"},
+        {"ticker": "4004.T", "name": "レゾナック"},
+    ],
     "半导体材料 / 高功能材料 / AI供应链": [
         {"ticker": "6988.T", "name": "日東電工"},
         {"ticker": "2802.T", "name": "味の素"},
@@ -283,7 +339,7 @@ def merge_expanded_stock_pool(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     settings = config.get("stock_pool", {}) or {}
     auto_expand = bool(settings.get("auto_expand_to_100", True))
-    target_count = int(settings.get("target_count", 100))
+    target_count = int(settings.get("target_count", 150))
     if not auto_expand:
         return config
 
@@ -1051,6 +1107,55 @@ THEME_CONNECTIONS_BY_TICKER: Dict[str, List[str]] = {
     "9434.T": ["通信基础设施", "现金流"],
 }
 
+
+
+AI_SUPPLY_CHAIN_FOCUS_CONNECTIONS: Dict[str, List[str]] = {
+    # L0 / high-purity materials / InP / precursor candidates
+    "4401.T": ["High-k材料", "ALD/CVD前驱体", "EUV/ArF光刻材料", "先进制程", "AI供应链瓶颈"],
+    "4094.T": ["金属盐", "电子材料", "表面处理", "冷门材料验证"],
+    "5016.T": ["InP基板", "化合物半导体", "光通信材料", "AI光互联"],
+    "4369.T": ["高纯半导体材料", "前驱体", "先进制程"],
+    "4187.T": ["电子材料", "功能性丙烯酸酯", "光刻/树脂原料"],
+    "4047.T": ["特殊气体", "电子材料", "半导体工艺材料"],
+    "4109.T": ["高纯化学品", "含氟材料", "半导体材料"],
+    # Thermal / ceramics / packaging materials
+    "5344.T": ["AlN陶瓷基板", "热管理", "高导热材料", "功率/封装材料"],
+    "5333.T": ["陶瓷材料", "电子材料", "能源基础设施"],
+    "6890.T": ["陶瓷部件", "半导体设备部件", "真空部件"],
+    "4061.T": ["氮化物材料", "放热材料", "电子材料"],
+    "5310.T": ["高纯石墨", "碳材料", "半导体热场材料"],
+    "7966.T": ["半导体粘着膜", "晶圆加工材料", "先进封装材料"],
+    "6971.T": ["陶瓷封装", "电子部件", "基板"],
+    "4118.T": ["高分子材料", "热管理材料", "电子材料"],
+    "6988.T": ["半导体材料", "高功能材料", "热管理", "制程保护/剥离"],
+    "4004.T": ["先进封装材料", "半导体材料", "AI供应链"],
+    # Test / inspection / yield / equipment
+    "6855.T": ["プローブカード", "HBM测试", "先进封装测试"],
+    "6941.T": ["test socket", "burn-in socket", "连接器", "测试供应链"],
+    "6614.T": ["半导体检测装置", "LSI设计", "图像处理"],
+    "6656.T": ["外观检查", "基板检查", "检测设备"],
+    "6338.T": ["SiC切断", "半导体制造装置", "功率半导体设备"],
+    "6387.T": ["化合物半导体设备", "SiC/GaN", "刻蚀/CVD"],
+    "6146.T": ["切割", "研削", "薄化", "先进封装"],
+    "6315.T": ["半导体封装设备", "先进封装"],
+    # Connectors / optical interconnect / data-center infrastructure
+    "6806.T": ["精密连接器", "高速连接", "电子部件"],
+    "6908.T": ["连接器", "车载/工业连接"],
+    "6807.T": ["连接器", "高可靠连接", "工业/车载/高速接口"],
+    "6804.T": ["连接器", "电子部件", "低估值观察"],
+    "6798.T": ["连接器", "电子部件"],
+    "6640.T": ["精密连接器", "高速连接", "电子连接"],
+    # Power / data center electricity
+    "6622.T": ["变压器", "功率电源", "半导体设备电源", "数据中心电力"],
+    "6996.T": ["电容", "电源", "蓄电系统"],
+    "6997.T": ["电容", "电源部件"],
+    "6963.T": ["SiC/GaN功率半导体", "电源IC"],
+    "6503.T": ["功率模块", "工业自动化", "电力设备"],
+    "6504.T": ["功率半导体", "工业电力"],
+    "6508.T": ["电力设备", "变电", "数据中心电力"],
+}
+
+THEME_CONNECTIONS_BY_TICKER.update(AI_SUPPLY_CHAIN_FOCUS_CONNECTIONS)
 
 
 def config_section(config: Optional[Dict[str, Any]], key: str, defaults: Dict[str, Any]) -> Dict[str, Any]:
