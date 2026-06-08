@@ -2,8 +2,9 @@ name: Japan Stock Monitor
 
 on:
   schedule:
+    # JST 17:17 on weekdays.
+    # Removed the previous backup run at JST 18:47 to prevent duplicate daily emails.
     - cron: "17 8 * * 1-5"
-    - cron: "47 9 * * 1-5"
   workflow_dispatch:
     inputs:
       mode:
@@ -20,7 +21,7 @@ on:
 
 concurrency:
   group: japan-stock-monitor-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   monitor:
